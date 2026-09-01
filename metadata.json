@@ -1,0 +1,6 @@
+{
+  "name": "OTIVO Chart View",
+  "description": "High-performance real-time trading platform with AI-driven analytics, live tick data streaming, and advanced charting.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API", "Real-time Market Data", "AI Trading Signals", "Advanced Charting"]
+}

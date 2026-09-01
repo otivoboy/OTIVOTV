@@ -1,0 +1,254 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-tv-bg: #ffffff;
+  --color-tv-border: #e0e3eb;
+  --color-tv-hover: #f0f3fa;
+  --color-tv-text: #131722;
+  --color-tv-muted: #707584;
+  --color-tv-accent: #2962ff;
+  --color-tv-buy: #2962ff;
+  --color-tv-sell: #f23645;
+}
+
+@layer base {
+  :root {
+    --tv-bg: #ffffff;
+    --tv-border: #e0e3eb;
+    --tv-hover: #f0f3fa;
+    --tv-text: #131722;
+    --tv-muted: #707584;
+    --tv-accent: #2962ff;
+  }
+
+  .dark {
+    --tv-bg: #131722;
+    --tv-border: #2a2e39;
+    --tv-hover: #2a2e39;
+    --tv-text: #d1d4dc;
+    --tv-muted: #787b86;
+    --tv-accent: #2962ff;
+  }
+
+  body {
+    background-color: var(--tv-bg);
+    color: var(--tv-text);
+    @apply font-sans antialiased overflow-hidden transition-colors duration-200;
+  }
+}
+
+@layer components {
+  .tv-border-r {
+    border-right: 1px solid var(--tv-border);
+  }
+  .tv-border-l {
+    border-left: 1px solid var(--tv-border);
+  }
+  .tv-border-t {
+    border-top: 1px solid var(--tv-border);
+  }
+  .tv-border-b {
+    border-bottom: 1px solid var(--tv-border);
+  }
+  .tv-hover-bg {
+    @apply hover:bg-[var(--tv-hover)];
+  }
+  .tv-text {
+    color: var(--tv-text);
+  }
+  .tv-muted {
+    color: var(--tv-muted);
+  }
+  .tv-bg {
+    background-color: var(--tv-bg);
+  }
+}
+
+/* Custom classes to use variables */
+.bg-tv-bg { background-color: var(--tv-bg); }
+.text-tv-text { color: var(--tv-text); }
+.text-tv-muted { color: var(--tv-muted); }
+.border-tv-border { border-color: var(--tv-border); }
+.hover-bg-tv-hover:hover { background-color: var(--tv-hover); }
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-zinc-300 rounded-full hover:bg-zinc-400;
+}
+
+/* Hide scrollbar utility */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Editor Syntax Highlighting */
+.editor-textarea {
+  outline: none !important;
+}
+
+.editor-pre .token.keyword { color: #569cd6; }
+.editor-pre .token.function { color: #dcdcaa; }
+.editor-pre .token.string { color: #ce9178; }
+.editor-pre .token.comment { color: #6a9955; font-style: italic; }
+.editor-pre .token.operator { color: #d4d4d4; }
+.editor-pre .token.number { color: #b5cea8; }
+.editor-pre .token.boolean { color: #569cd6; }
+.editor-pre .token.parameter { color: #9cdcfe; }
+
+/* OTIVO Forex Loader Animations & Styling */
+.otivo-inline-block {
+  display: inline-block;
+  filter: drop-shadow(0 0 8px var(--glow-color, rgba(16, 185, 129, 0.4)));
+  transition: filter 0.3s ease;
+}
+
+.otivo-loader {
+  display: flex;
+  margin: 0.25em 0;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+@media (max-width: 460px) {
+  .otivo-loader {
+    gap: 8px;
+    transform: scale(0.85);
+  }
+}
+
+@media (max-width: 360px) {
+  .otivo-loader {
+    gap: 5px;
+    transform: scale(0.72);
+  }
+}
+
+/* SVG Line Dash & Offset Choreography */
+.otivo-dash {
+  animation: otivoDashArray 2.5s ease-in-out infinite,
+             otivoDashOffset 2.5s linear infinite;
+}
+
+.otivo-spin {
+  animation: otivoSpinDashArray 2s ease-in-out infinite,
+             otivoSpin 6s cubic-bezier(0.4, 0, 0.2, 1) infinite,
+             otivoDashOffset 2s linear infinite;
+  transform-origin: center;
+}
+
+.otivo-pulse-slow {
+  animation: otivoSubtlePulse 3s ease-in-out infinite;
+}
+
+@keyframes otivoSubtlePulse {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50% { transform: scale(1.05); opacity: 1; }
+}
+
+@keyframes otivoDashArray {
+  0% {
+    stroke-dasharray: 0 1 359 0;
+  }
+  50% {
+    stroke-dasharray: 0 180 180 0;
+  }
+  100% {
+    stroke-dasharray: 359 1 0 0;
+  }
+}
+
+@keyframes otivoSpinDashArray {
+  0% {
+    stroke-dasharray: 270 90;
+  }
+  50% {
+    stroke-dasharray: 90 270;
+  }
+  100% {
+    stroke-dasharray: 270 90;
+  }
+}
+
+@keyframes otivoDashOffset {
+  0% {
+    stroke-dashoffset: 360;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes otivoSpin {
+  0% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(180deg);
+  }
+  50% {
+    transform: rotate(360deg);
+  }
+  75% {
+    transform: rotate(540deg);
+  }
+  100% {
+    transform: rotate(720deg);
+  }
+}
+
+.otivo-brand-caption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 5px;
+  text-transform: uppercase;
+  color: #9ca3af;
+  opacity: 0.8;
+}
+
+.otivo-brand-caption .otivo-accent-bull {
+  color: #10b981;
+  text-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+}
+
+.otivo-brand-caption .otivo-accent-bear {
+  color: #ef4444;
+  text-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+}
+
+.otivo-ticker-line {
+  width: 120px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(16, 185, 129, 0.5), rgba(239, 68, 68, 0.5), transparent);
+}
+
+/* Suppress any library attribution logo or watermarks in chart corner */
+[class*="attributionLogo"],
+[id*="tv-attr-logo"],
+a[href*="tradingview.com"] {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
