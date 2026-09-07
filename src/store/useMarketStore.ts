@@ -1,7 +1,7 @@
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
 import { Candle, Tick, Timeframe, MarketSymbol, ChartType, PriceAlert, ChartSettings, SavedChartLayout, MultiChartLayoutType, ReplayState } from "../types";
 import { soundManager } from "../lib/soundEffects";
+import { saveToGoogleDrive, loadFromGoogleDrive } from "../lib/driveSync";
 
 export interface Drawing {
   id: string;
@@ -85,6 +85,9 @@ interface MarketState {
   isSaveLayoutModalOpen: boolean;
   isLayoutSelectorOpen: boolean;
   
+  // Cloud Sync Status
+  isSyncingCloud: boolean;
+
   setActivePage: (page: 'chart' | 'technical-analysis') => void;
   setSymbol: (symbol: string) => void;
   setAvailableSymbols: (symbols: MarketSymbol[]) => void;
@@ -108,7 +111,7 @@ interface MarketState {
   redoDrawing: () => void;
   addScript: (script: IndicatorItem) => void;
   applyScript: (script: IndicatorItem) => void;
-  addIndicator: (indicator: { name: string; code: string; enabled?: boolean; params?: Record<string, any> }) => void;
+  addIndicator: (indicator: { id?: string; name: string; code: string; enabled?: boolean; params?: Record<string, any> }) => void;
   updateIndicator: (id: string, updates: Partial<IndicatorItem>) => void;
   removeIndicator: (id: string) => void;
   toggleIndicatorVisibility: (id: string) => void;
@@ -149,38 +152,87 @@ interface MarketState {
   setScreenshotModalOpen: (open: boolean) => void;
   setSaveLayoutModalOpen: (open: boolean) => void;
   setLayoutSelectorOpen: (open: boolean) => void;
+
+  // Cloud Actions
+  syncToCloud: (accessToken: string) => Promise<void>;
+  syncFromCloud: (accessToken: string) => Promise<void>;
 }
 
 export const INITIAL_CURRENCY_PAIRS: MarketSymbol[] = [
-  { id: '1HZ100V', symbol: '1HZ100V', display: 'Volatility 100 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived' },
-  { id: 'R_100', symbol: 'R_100', display: 'Volatility 100 Index', market: 'synthetic_index', marketDisplay: 'Derived' },
-  { id: '1HZ50V', symbol: '1HZ50V', display: 'Volatility 50 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived' },
-  { id: 'R_50', symbol: 'R_50', display: 'Volatility 50 Index', market: 'synthetic_index', marketDisplay: 'Derived' },
-  { id: '1HZ75V', symbol: '1HZ75V', display: 'Volatility 75 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived' },
-  { id: '1HZ25V', symbol: '1HZ25V', display: 'Volatility 25 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived' },
-  { id: '1HZ10V', symbol: '1HZ10V', display: 'Volatility 10 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived' },
-  { id: 'frxEURUSD', symbol: 'frxEURUSD', display: 'EUR/USD', market: 'forex', marketDisplay: 'Forex' },
-  { id: 'frxGBPUSD', symbol: 'frxGBPUSD', display: 'GBP/USD', market: 'forex', marketDisplay: 'Forex' },
-  { id: 'frxUSDJPY', symbol: 'frxUSDJPY', display: 'USD/JPY', market: 'forex', marketDisplay: 'Forex' },
-  { id: 'frxUSDCHF', symbol: 'frxUSDCHF', display: 'USD/CHF', market: 'forex', marketDisplay: 'Forex' },
-  { id: 'frxAUDUSD', symbol: 'frxAUDUSD', display: 'AUD/USD', market: 'forex', marketDisplay: 'Forex' },
-  { id: 'frxUSDCAD', symbol: 'frxUSDCAD', display: 'USD/CAD', market: 'forex', marketDisplay: 'Forex' },
-  { id: 'frxNZDUSD', symbol: 'frxNZDUSD', display: 'NZD/USD', market: 'forex', marketDisplay: 'Forex' },
-  { id: 'frxEURGBP', symbol: 'frxEURGBP', display: 'EUR/GBP', market: 'forex', marketDisplay: 'Forex' },
-  { id: 'frxEURJPY', symbol: 'frxEURJPY', display: 'EUR/JPY', market: 'forex', marketDisplay: 'Forex' },
-  { id: 'frxGBPJPY', symbol: 'frxGBPJPY', display: 'GBP/JPY', market: 'forex', marketDisplay: 'Forex' },
-  { id: 'frxXAUUSD', symbol: 'frxXAUUSD', display: 'Gold (XAU/USD)', market: 'commodities', marketDisplay: 'Commodities' },
-  { id: 'frxXAGUSD', symbol: 'frxXAGUSD', display: 'Silver (XAG/USD)', market: 'commodities', marketDisplay: 'Commodities' },
-  { id: 'cryBTCUSD', symbol: 'cryBTCUSD', display: 'BTC/USD', market: 'cryptocurrency', marketDisplay: 'Cryptocurrencies' },
-  { id: 'cryETHUSD', symbol: 'cryETHUSD', display: 'ETH/USD', market: 'cryptocurrency', marketDisplay: 'Cryptocurrencies' },
+  // Derived / Synthetic Volatility Indices
+  { id: '1HZ100V', symbol: '1HZ100V', display: 'Volatility 100 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.01 },
+  { id: 'R_100', symbol: 'R_100', display: 'Volatility 100 Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.01 },
+  { id: '1HZ50V', symbol: '1HZ50V', display: 'Volatility 50 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.0001 },
+  { id: 'R_50', symbol: 'R_50', display: 'Volatility 50 Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.0001 },
+  { id: '1HZ75V', symbol: '1HZ75V', display: 'Volatility 75 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.01 },
+  { id: '1HZ25V', symbol: '1HZ25V', display: 'Volatility 25 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.001 },
+  { id: '1HZ10V', symbol: '1HZ10V', display: 'Volatility 10 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.001 },
+
+  // Boom Indices
+  { id: 'BOOM50', symbol: 'BOOM50', display: 'Boom 50 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'BOOM100', symbol: 'BOOM100', display: 'Boom 100 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'BOOM150', symbol: 'BOOM150', display: 'Boom 150 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'BOOM200', symbol: 'BOOM200', display: 'Boom 200 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'BOOM300', symbol: 'BOOM300', display: 'Boom 300 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'BOOM500', symbol: 'BOOM500', display: 'Boom 500 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'BOOM600', symbol: 'BOOM600', display: 'Boom 600 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'BOOM900', symbol: 'BOOM900', display: 'Boom 900 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'BOOM1000', symbol: 'BOOM1000', display: 'Boom 1000 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+
+  // Crash Indices
+  { id: 'CRASH50', symbol: 'CRASH50', display: 'Crash 50 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'CRASH100', symbol: 'CRASH100', display: 'Crash 100 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'CRASH150', symbol: 'CRASH150', display: 'Crash 150 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'CRASH200', symbol: 'CRASH200', display: 'Crash 200 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'CRASH300', symbol: 'CRASH300', display: 'Crash 300 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'CRASH500', symbol: 'CRASH500', display: 'Crash 500 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'CRASH600', symbol: 'CRASH600', display: 'Crash 600 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'CRASH900', symbol: 'CRASH900', display: 'Crash 900 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'CRASH1000', symbol: 'CRASH1000', display: 'Crash 1000 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+
+  // Forex Major & Minor Pairs
+  { id: 'frxEURUSD', symbol: 'frxEURUSD', display: 'EUR/USD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'frxGBPUSD', symbol: 'frxGBPUSD', display: 'GBP/USD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'frxUSDJPY', symbol: 'frxUSDJPY', display: 'USD/JPY', market: 'forex', marketDisplay: 'Forex', pip: 0.001 },
+  { id: 'frxUSDCHF', symbol: 'frxUSDCHF', display: 'USD/CHF', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'frxAUDUSD', symbol: 'frxAUDUSD', display: 'AUD/USD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'frxUSDCAD', symbol: 'frxUSDCAD', display: 'USD/CAD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'frxNZDUSD', symbol: 'frxNZDUSD', display: 'NZD/USD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'frxEURGBP', symbol: 'frxEURGBP', display: 'EUR/GBP', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'frxEURJPY', symbol: 'frxEURJPY', display: 'EUR/JPY', market: 'forex', marketDisplay: 'Forex', pip: 0.001 },
+  { id: 'frxGBPJPY', symbol: 'frxGBPJPY', display: 'GBP/JPY', market: 'forex', marketDisplay: 'Forex', pip: 0.001 },
+
+  // Added Forex Cross Pairs
+  { id: 'FRXEURAUD', symbol: 'FRXEURAUD', display: 'EUR/AUD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXEURCAD', symbol: 'FRXEURCAD', display: 'EUR/CAD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXEURNZD', symbol: 'FRXEURNZD', display: 'EUR/NZD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXEURCHF', symbol: 'FRXEURCHF', display: 'EUR/CHF', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXGBPAUD', symbol: 'FRXGBPAUD', display: 'GBP/AUD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXGBPCAD', symbol: 'FRXGBPCAD', display: 'GBP/CAD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXGBPNZD', symbol: 'FRXGBPNZD', display: 'GBP/NZD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXGBPCHF', symbol: 'FRXGBPCHF', display: 'GBP/CHF', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXAUDJPY', symbol: 'FRXAUDJPY', display: 'AUD/JPY', market: 'forex', marketDisplay: 'Forex', pip: 0.001 },
+  { id: 'FRXCADJPY', symbol: 'FRXCADJPY', display: 'CAD/JPY', market: 'forex', marketDisplay: 'Forex', pip: 0.001 },
+  { id: 'FRXNZDJPY', symbol: 'FRXNZDJPY', display: 'NZD/JPY', market: 'forex', marketDisplay: 'Forex', pip: 0.001 },
+  { id: 'FRXCHFJPY', symbol: 'FRXCHFJPY', display: 'CHF/JPY', market: 'forex', marketDisplay: 'Forex', pip: 0.001 },
+  { id: 'FRXAUDCAD', symbol: 'FRXAUDCAD', display: 'AUD/CAD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXAUDNZD', symbol: 'FRXAUDNZD', display: 'AUD/NZD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXAUDCHF', symbol: 'FRXAUDCHF', display: 'AUD/CHF', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXNZDCAD', symbol: 'FRXNZDCAD', display: 'NZD/CAD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXNZDCHF', symbol: 'FRXNZDCHF', display: 'NZD/CHF', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXCADCHF', symbol: 'FRXCADCHF', display: 'CAD/CHF', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+
+  // Commodities & Cryptocurrencies
+  { id: 'frxXAUUSD', symbol: 'frxXAUUSD', display: 'Gold (XAU/USD)', market: 'commodities', marketDisplay: 'Commodities', pip: 0.01 },
+  { id: 'frxXAGUSD', symbol: 'frxXAGUSD', display: 'Silver (XAG/USD)', market: 'commodities', marketDisplay: 'Commodities', pip: 0.001 },
+  { id: 'cryBTCUSD', symbol: 'cryBTCUSD', display: 'BTC/USD', market: 'cryptocurrency', marketDisplay: 'Cryptocurrencies', pip: 0.1 },
+  { id: 'cryETHUSD', symbol: 'cryETHUSD', display: 'ETH/USD', market: 'cryptocurrency', marketDisplay: 'Cryptocurrencies', pip: 0.01 },
 ];
 
 export const CURRENCY_PAIRS = INITIAL_CURRENCY_PAIRS;
 
-export const useMarketStore = create<MarketState>()(
-  persist(
-    (set) => ({
-      activeSymbol: INITIAL_CURRENCY_PAIRS[0].id,
+export const useMarketStore = create<MarketState>()((set, get) => ({
+  activeSymbol: INITIAL_CURRENCY_PAIRS[0].id,
       activeTimeframe: "1m",
       symbols: INITIAL_CURRENCY_PAIRS.map(p => p.id),
       availableSymbols: INITIAL_CURRENCY_PAIRS,
@@ -258,6 +310,7 @@ export const useMarketStore = create<MarketState>()(
       isScreenshotModalOpen: false,
       isSaveLayoutModalOpen: false,
       isLayoutSelectorOpen: false,
+      isSyncingCloud: false,
 
       setActivePage: (page) => set({ activePage: page }),
       setSymbol: (symbol) => set({ 
@@ -267,9 +320,18 @@ export const useMarketStore = create<MarketState>()(
         isLoading: true, 
         selectedDrawingId: null 
       }),
-      setAvailableSymbols: (symbols) => set({ 
-        availableSymbols: symbols,
-        symbols: symbols.map(s => s.id)
+      setAvailableSymbols: (symbols) => set(() => {
+        const existingIds = new Set(symbols.map(s => s.id.toLowerCase()));
+        const merged = [...symbols];
+        INITIAL_CURRENCY_PAIRS.forEach(p => {
+          if (!existingIds.has(p.id.toLowerCase())) {
+            merged.push(p);
+          }
+        });
+        return {
+          availableSymbols: merged,
+          symbols: merged.map(s => s.id)
+        };
       }),
       setTimeframe: (tf) => set((state) => {
         const existing = state.candlesByTimeframe[tf];
@@ -540,11 +602,11 @@ export const useMarketStore = create<MarketState>()(
         activeIndicators: [
           ...state.activeIndicators,
           {
-            id: Math.random().toString(36).substring(2, 9),
+            id: indicator.id || Math.random().toString(36).substring(2, 9),
             name: indicator.name,
             code: indicator.code,
             enabled: indicator.enabled ?? true,
-            params: indicator.params
+            params: indicator.params || {}
           }
         ]
       })),
@@ -772,36 +834,42 @@ export const useMarketStore = create<MarketState>()(
       setScreenshotModalOpen: (open) => set({ isScreenshotModalOpen: open }),
       setSaveLayoutModalOpen: (open) => set({ isSaveLayoutModalOpen: open }),
       setLayoutSelectorOpen: (open) => set({ isLayoutSelectorOpen: open }),
-    }),
-    {
-      name: 'otivo_user_preferences_v1',
-      storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({
-        activePage: state.activePage,
-        activeSymbol: state.activeSymbol,
-        activeTimeframe: state.activeTimeframe,
-        theme: state.theme,
-        activeTool: state.activeTool,
-        drawings: state.drawings,
-        savedScripts: state.savedScripts,
-        activeIndicators: state.activeIndicators,
-        hiddenIndicators: state.hiddenIndicators,
-        taTimeframe: state.taTimeframe,
-        pivotMode: state.pivotMode,
-        activePanel: state.activePanel,
-        chartType: state.chartType,
-        alerts: state.alerts,
-        savedLayouts: state.savedLayouts,
-        currentLayoutName: state.currentLayoutName,
-        chartSettings: state.chartSettings,
-        multiLayout: state.multiLayout,
-      }),
-      onRehydrateStorage: () => (state) => {
-        if (state && typeof document !== 'undefined') {
-          document.documentElement.classList.toggle('dark', state.theme === 'dark');
+
+      // Google Drive Actions
+      syncToCloud: async (accessToken: string) => {
+        const state = get();
+        set({ isSyncingCloud: true });
+        try {
+          await saveToGoogleDrive(accessToken, {
+            layouts: state.savedLayouts,
+            chartSettings: state.chartSettings,
+            activeIndicators: state.activeIndicators,
+            drawings: state.drawings,
+            updatedAt: Date.now()
+          });
+        } catch (err) {
+          console.error("Cloud backup failed:", err);
+        } finally {
+          set({ isSyncingCloud: false });
+        }
+      },
+      syncFromCloud: async (accessToken: string) => {
+        set({ isSyncingCloud: true });
+        try {
+          const data = await loadFromGoogleDrive(accessToken);
+          if (data) {
+            set({
+              savedLayouts: data.layouts || get().savedLayouts,
+              chartSettings: data.chartSettings || get().chartSettings,
+              activeIndicators: data.activeIndicators || get().activeIndicators,
+              drawings: data.drawings || get().drawings
+            });
+          }
+        } catch (err) {
+          console.error("Cloud restore failed:", err);
+        } finally {
+          set({ isSyncingCloud: false });
         }
       }
-    }
-
-  )
+    })
 );

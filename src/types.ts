@@ -31,7 +31,7 @@ export interface AISignal {
   reason: string;
 }
 
-export type Timeframe = '1m' | '3m' | '5m' | '15m' | '30m' | '1h' | '2h' | '4h' | '8h' | '1d' | '1w';
+export type Timeframe = '1m' | '3m' | '5m' | '15m' | '30m' | '1h' | '2h' | '4h' | '1d' | '1w';
 
 export type ChartType = 
   | 'candlestick' 
@@ -95,4 +95,14 @@ export interface ReplayState {
   currentIndex: number; // index into fullCandles
   totalCandles: number;
   selectedCutoffIndex: number;
+}
+
+export interface AuthUser {
+  uid: string;
+  phoneNumber?: string | null;
+  email?: string | null;
+  displayName?: string | null;
+  photoURL?: string | null;
+  createdAt?: string;
+  lastLoginAt?: string;
 }

@@ -2,6 +2,7 @@ import { createServer } from "http";
 import express from "express";
 import { Server } from "socket.io";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
@@ -29,12 +30,38 @@ export interface MarketSymbol {
 }
 
 const DEFAULT_SYMBOLS: MarketSymbol[] = [
+  // Derived / Synthetic Volatility Indices
   { id: '1HZ100V', symbol: '1HZ100V', display: 'Volatility 100 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.01 },
   { id: 'R_100', symbol: 'R_100', display: 'Volatility 100 Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.01 },
-  { id: '1HZ10V', symbol: '1HZ10V', display: 'Volatility 10 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.001 },
+  { id: '1HZ50V', symbol: '1HZ50V', display: 'Volatility 50 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.0001 },
   { id: 'R_50', symbol: 'R_50', display: 'Volatility 50 Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.0001 },
-  { id: '1HZ25V', symbol: '1HZ25V', display: 'Volatility 25 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.001 },
   { id: '1HZ75V', symbol: '1HZ75V', display: 'Volatility 75 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.01 },
+  { id: '1HZ25V', symbol: '1HZ25V', display: 'Volatility 25 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.001 },
+  { id: '1HZ10V', symbol: '1HZ10V', display: 'Volatility 10 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.001 },
+
+  // Boom Indices
+  { id: 'BOOM50', symbol: 'BOOM50', display: 'Boom 50 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'BOOM100', symbol: 'BOOM100', display: 'Boom 100 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'BOOM150', symbol: 'BOOM150', display: 'Boom 150 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'BOOM200', symbol: 'BOOM200', display: 'Boom 200 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'BOOM300', symbol: 'BOOM300', display: 'Boom 300 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'BOOM500', symbol: 'BOOM500', display: 'Boom 500 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'BOOM600', symbol: 'BOOM600', display: 'Boom 600 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'BOOM900', symbol: 'BOOM900', display: 'Boom 900 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'BOOM1000', symbol: 'BOOM1000', display: 'Boom 1000 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+
+  // Crash Indices
+  { id: 'CRASH50', symbol: 'CRASH50', display: 'Crash 50 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'CRASH100', symbol: 'CRASH100', display: 'Crash 100 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'CRASH150', symbol: 'CRASH150', display: 'Crash 150 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'CRASH200', symbol: 'CRASH200', display: 'Crash 200 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'CRASH300', symbol: 'CRASH300', display: 'Crash 300 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'CRASH500', symbol: 'CRASH500', display: 'Crash 500 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'CRASH600', symbol: 'CRASH600', display: 'Crash 600 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'CRASH900', symbol: 'CRASH900', display: 'Crash 900 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'CRASH1000', symbol: 'CRASH1000', display: 'Crash 1000 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+
+  // Forex Major & Minor Pairs
   { id: 'frxEURUSD', symbol: 'frxEURUSD', display: 'EUR/USD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
   { id: 'frxGBPUSD', symbol: 'frxGBPUSD', display: 'GBP/USD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
   { id: 'frxUSDJPY', symbol: 'frxUSDJPY', display: 'USD/JPY', market: 'forex', marketDisplay: 'Forex', pip: 0.001 },
@@ -45,7 +72,30 @@ const DEFAULT_SYMBOLS: MarketSymbol[] = [
   { id: 'frxEURGBP', symbol: 'frxEURGBP', display: 'EUR/GBP', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
   { id: 'frxEURJPY', symbol: 'frxEURJPY', display: 'EUR/JPY', market: 'forex', marketDisplay: 'Forex', pip: 0.001 },
   { id: 'frxGBPJPY', symbol: 'frxGBPJPY', display: 'GBP/JPY', market: 'forex', marketDisplay: 'Forex', pip: 0.001 },
+
+  // Added Forex Cross Pairs
+  { id: 'FRXEURAUD', symbol: 'FRXEURAUD', display: 'EUR/AUD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXEURCAD', symbol: 'FRXEURCAD', display: 'EUR/CAD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXEURNZD', symbol: 'FRXEURNZD', display: 'EUR/NZD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXEURCHF', symbol: 'FRXEURCHF', display: 'EUR/CHF', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXGBPAUD', symbol: 'FRXGBPAUD', display: 'GBP/AUD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXGBPCAD', symbol: 'FRXGBPCAD', display: 'GBP/CAD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXGBPNZD', symbol: 'FRXGBPNZD', display: 'GBP/NZD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXGBPCHF', symbol: 'FRXGBPCHF', display: 'GBP/CHF', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXAUDJPY', symbol: 'FRXAUDJPY', display: 'AUD/JPY', market: 'forex', marketDisplay: 'Forex', pip: 0.001 },
+  { id: 'FRXCADJPY', symbol: 'FRXCADJPY', display: 'CAD/JPY', market: 'forex', marketDisplay: 'Forex', pip: 0.001 },
+  { id: 'FRXNZDJPY', symbol: 'FRXNZDJPY', display: 'NZD/JPY', market: 'forex', marketDisplay: 'Forex', pip: 0.001 },
+  { id: 'FRXCHFJPY', symbol: 'FRXCHFJPY', display: 'CHF/JPY', market: 'forex', marketDisplay: 'Forex', pip: 0.001 },
+  { id: 'FRXAUDCAD', symbol: 'FRXAUDCAD', display: 'AUD/CAD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXAUDNZD', symbol: 'FRXAUDNZD', display: 'AUD/NZD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXAUDCHF', symbol: 'FRXAUDCHF', display: 'AUD/CHF', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXNZDCAD', symbol: 'FRXNZDCAD', display: 'NZD/CAD', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXNZDCHF', symbol: 'FRXNZDCHF', display: 'NZD/CHF', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+  { id: 'FRXCADCHF', symbol: 'FRXCADCHF', display: 'CAD/CHF', market: 'forex', marketDisplay: 'Forex', pip: 0.00001 },
+
+  // Commodities & Cryptocurrencies
   { id: 'frxXAUUSD', symbol: 'frxXAUUSD', display: 'Gold (XAU/USD)', market: 'commodities', marketDisplay: 'Commodities', pip: 0.01 },
+  { id: 'frxXAGUSD', symbol: 'frxXAGUSD', display: 'Silver (XAG/USD)', market: 'commodities', marketDisplay: 'Commodities', pip: 0.001 },
   { id: 'cryBTCUSD', symbol: 'cryBTCUSD', display: 'BTC/USD', market: 'cryptocurrency', marketDisplay: 'Cryptocurrencies', pip: 0.1 },
   { id: 'cryETHUSD', symbol: 'cryETHUSD', display: 'ETH/USD', market: 'cryptocurrency', marketDisplay: 'Cryptocurrencies', pip: 0.01 },
 ];
@@ -491,14 +541,14 @@ async function startServer() {
     }
 
     const granularity = TIMEFRAME_TO_GRANULARITY[timeframe] || 60;
-    console.log(`📈 Requesting 5,000 ${timeframe} (granularity ${granularity}s) candles for: ${targetSymbol}`);
+    console.log(`📈 Requesting ${timeframe} (granularity ${granularity}s) candles for: ${targetSymbol}`);
 
     lastFetchedHistoryTime[historyKey] = now;
 
     derivWs.send(JSON.stringify({
       ticks_history: targetSymbol,
       adjust_start_time: 1,
-      count: 5000,
+      count: 1000,
       end: "latest",
       style: "candles",
       granularity: granularity,
@@ -568,12 +618,11 @@ async function startServer() {
         }
       }, 15000);
 
-      // Start live candle polling engine (every 1000ms)
+      // Fallback candle sync engine (every 20s to avoid rate limiting)
       if (livePollInterval) clearInterval(livePollInterval);
       livePollInterval = setInterval(() => {
         if (derivWs?.readyState !== WebSocket.OPEN) return;
 
-        // Poll live 1m candles for all requested symbols to guarantee real exchange prices and candles
         const symbolsToPoll = Array.from(requestedSymbols);
         symbolsToPoll.forEach((sym, index) => {
           setTimeout(() => {
@@ -592,9 +641,9 @@ async function startServer() {
                 }
               }));
             }
-          }, index * 40);
+          }, index * 200);
         });
-      }, 1000);
+      }, 20000);
 
       // Continuous candle rollover engine (checks minute boundaries every 500ms)
       const rolloverInterval = setInterval(() => {
@@ -812,11 +861,9 @@ async function startServer() {
         } else if (msg.msg_type === "ping") {
           // ping response, ignore
         } else if (msg.error) {
-          const failedSym = msg.echo_req?.ticks || msg.echo_req?.ticks_history || msg.passthrough?.symbol;
-          if (msg.error.code === 'InvalidSymbol' && failedSym) {
-            console.warn(`⚠️ Deriv reported invalid symbol (${failedSym}): ignoring.`);
-          } else {
-            console.warn(`⚠️ Deriv API Notice (${msg.error.code}):`, msg.error.message);
+          // Gracefully absorb Deriv rate-limit/info notices without polluting terminal with fatal warnings
+          if (process.env.DEBUG_DERIV) {
+            console.log(`[Deriv Info] (${msg.error.code}):`, msg.error.message);
           }
         }
       } catch (err) {
@@ -908,23 +955,19 @@ async function startServer() {
     console.log('📦 Running in PRODUCTION mode');
     const distPath = path.resolve(process.cwd(), "dist");
     
-    // Check if dist exists, if not, maybe we are actually in dev but NODE_ENV was set
-    import('fs').then(fs => {
-      if (fs.existsSync(distPath)) {
-        app.use(express.static(distPath));
-        app.get("*", (req, res) => {
-          res.sendFile(path.join(distPath, "index.html"));
-        });
-      } else {
-        console.warn('⚠️  DIST folder not found! Falling back to Vite middleware even in production mode.');
-        createViteServer({
-          server: { middlewareMode: true },
-          appType: "spa"
-        }).then(vite => {
-          app.use(vite.middlewares);
-        });
-      }
-    });
+    if (fs.existsSync(distPath)) {
+      app.use(express.static(distPath));
+      app.get("*", (req, res) => {
+        res.sendFile(path.join(distPath, "index.html"));
+      });
+    } else {
+      console.warn('⚠️  DIST folder not found! Falling back to Vite middleware even in production mode.');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa"
+      });
+      app.use(vite.middlewares);
+    }
   }
 
   httpServer.on('error', (err) => {

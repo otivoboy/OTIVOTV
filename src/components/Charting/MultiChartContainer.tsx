@@ -38,17 +38,15 @@ export const MultiChartContainer: React.FC = () => {
   };
 
   const handleUpdatePaneSymbol = (paneId: string, newSymbol: string) => {
+    setActivePaneId(paneId);
     setPanes(prev => prev.map(p => p.id === paneId ? { ...p, symbol: newSymbol } : p));
-    if (paneId === activePaneId) {
-      setSymbol(newSymbol);
-    }
+    setSymbol(newSymbol);
   };
 
   const handleUpdatePaneTimeframe = (paneId: string, newTimeframe: Timeframe) => {
+    setActivePaneId(paneId);
     setPanes(prev => prev.map(p => p.id === paneId ? { ...p, timeframe: newTimeframe } : p));
-    if (paneId === activePaneId) {
-      setTimeframe(newTimeframe);
-    }
+    setTimeframe(newTimeframe);
   };
 
   const handleMaximizePane = (pane: PaneInfo) => {
@@ -74,7 +72,7 @@ export const MultiChartContainer: React.FC = () => {
 
     return (
       <div className="w-full h-full grid grid-cols-1 md:grid-cols-2 gap-1 bg-tv-border overflow-hidden p-0.5" id="multi-chart-split-2v">
-        <div className={`relative h-full w-full overflow-hidden rounded-xs transition-all ${activePaneId === pane0.id ? 'ring-1.5 ring-tv-accent z-10' : 'opacity-95'}`}>
+        <div key={pane0.id} className={`relative h-full w-full min-h-0 min-w-0 overflow-hidden rounded-xs transition-all ${activePaneId === pane0.id ? 'ring-2 ring-tv-accent z-10' : 'opacity-95'}`}>
           <TradingChart
             paneId={pane0.id}
             symbol={pane0.symbol}
@@ -87,7 +85,7 @@ export const MultiChartContainer: React.FC = () => {
             showPaneHeader={true}
           />
         </div>
-        <div className={`relative h-full w-full overflow-hidden rounded-xs transition-all ${activePaneId === pane1.id ? 'ring-1.5 ring-tv-accent z-10' : 'opacity-95'}`}>
+        <div key={pane1.id} className={`relative h-full w-full min-h-0 min-w-0 overflow-hidden rounded-xs transition-all ${activePaneId === pane1.id ? 'ring-2 ring-tv-accent z-10' : 'opacity-95'}`}>
           <TradingChart
             paneId={pane1.id}
             symbol={pane1.symbol}
@@ -107,11 +105,11 @@ export const MultiChartContainer: React.FC = () => {
   // 3. 2 Charts Horizontal Split (Top / Bottom stacked)
   if (multiLayout === '2h') {
     const pane0 = panes[0] || { id: 'pane-0', symbol: activeSymbol, timeframe: activeTimeframe };
-    const pane1 = panes[1] || { id: 'pane-1', symbol: activeSymbol, timeframe: '1h' };
+    const pane1 = panes[1] || { id: 'pane-1', symbol: 'cryBTCUSD', timeframe: '1h' };
 
     return (
       <div className="w-full h-full grid grid-rows-2 gap-1 bg-tv-border overflow-hidden p-0.5" id="multi-chart-split-2h">
-        <div className={`relative h-full w-full overflow-hidden rounded-xs transition-all ${activePaneId === pane0.id ? 'ring-1.5 ring-tv-accent z-10' : 'opacity-95'}`}>
+        <div key={pane0.id} className={`relative h-full w-full min-h-0 min-w-0 overflow-hidden rounded-xs transition-all ${activePaneId === pane0.id ? 'ring-2 ring-tv-accent z-10' : 'opacity-95'}`}>
           <TradingChart
             paneId={pane0.id}
             symbol={pane0.symbol}
@@ -124,7 +122,7 @@ export const MultiChartContainer: React.FC = () => {
             showPaneHeader={true}
           />
         </div>
-        <div className={`relative h-full w-full overflow-hidden rounded-xs transition-all ${activePaneId === pane1.id ? 'ring-1.5 ring-tv-accent z-10' : 'opacity-95'}`}>
+        <div key={pane1.id} className={`relative h-full w-full min-h-0 min-w-0 overflow-hidden rounded-xs transition-all ${activePaneId === pane1.id ? 'ring-2 ring-tv-accent z-10' : 'opacity-95'}`}>
           <TradingChart
             paneId={pane1.id}
             symbol={pane1.symbol}
@@ -150,7 +148,7 @@ export const MultiChartContainer: React.FC = () => {
     return (
       <div className="w-full h-full flex flex-col md:flex-row gap-1 bg-tv-border overflow-hidden p-0.5" id="multi-chart-split-3v">
         {/* Left Column (Master Chart) */}
-        <div className={`relative h-1/2 md:h-full md:w-3/5 overflow-hidden rounded-xs transition-all ${activePaneId === pane0.id ? 'ring-1.5 ring-tv-accent z-10' : 'opacity-95'}`}>
+        <div key={pane0.id} className={`relative h-1/2 md:h-full md:w-3/5 min-h-0 min-w-0 overflow-hidden rounded-xs transition-all ${activePaneId === pane0.id ? 'ring-2 ring-tv-accent z-10' : 'opacity-95'}`}>
           <TradingChart
             paneId={pane0.id}
             symbol={pane0.symbol}
@@ -165,8 +163,8 @@ export const MultiChartContainer: React.FC = () => {
         </div>
 
         {/* Right Column (2 Stacked Aux Charts) */}
-        <div className="h-1/2 md:h-full md:w-2/5 flex flex-col gap-1 overflow-hidden">
-          <div className={`relative h-1/2 w-full overflow-hidden rounded-xs transition-all ${activePaneId === pane1.id ? 'ring-1.5 ring-tv-accent z-10' : 'opacity-95'}`}>
+        <div className="h-1/2 md:h-full md:w-2/5 min-h-0 min-w-0 flex flex-col gap-1 overflow-hidden">
+          <div key={pane1.id} className={`relative h-1/2 w-full min-h-0 min-w-0 overflow-hidden rounded-xs transition-all ${activePaneId === pane1.id ? 'ring-2 ring-tv-accent z-10' : 'opacity-95'}`}>
             <TradingChart
               paneId={pane1.id}
               symbol={pane1.symbol}
@@ -179,7 +177,7 @@ export const MultiChartContainer: React.FC = () => {
               showPaneHeader={true}
             />
           </div>
-          <div className={`relative h-1/2 w-full overflow-hidden rounded-xs transition-all ${activePaneId === pane2.id ? 'ring-1.5 ring-tv-accent z-10' : 'opacity-95'}`}>
+          <div key={pane2.id} className={`relative h-1/2 w-full min-h-0 min-w-0 overflow-hidden rounded-xs transition-all ${activePaneId === pane2.id ? 'ring-2 ring-tv-accent z-10' : 'opacity-95'}`}>
             <TradingChart
               paneId={pane2.id}
               symbol={pane2.symbol}
@@ -213,7 +211,7 @@ export const MultiChartContainer: React.FC = () => {
           return (
             <div 
               key={p.id} 
-              className={`relative h-full w-full overflow-hidden rounded-xs transition-all ${isActive ? 'ring-1.5 ring-tv-accent z-10' : 'opacity-95'}`}
+              className={`relative h-full w-full min-h-0 min-w-0 overflow-hidden rounded-xs transition-all ${isActive ? 'ring-2 ring-tv-accent z-10' : 'opacity-95'}`}
             >
               <TradingChart
                 paneId={p.id}

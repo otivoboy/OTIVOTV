@@ -14,7 +14,7 @@ export interface IndicatorParamDef {
 export interface IndicatorPreset {
   id: string;
   name: string;
-  category: 'Trend' | 'Oscillator' | 'Volatility' | 'Smart Money' | 'Order Flow' | 'Strategies' | 'Sessions' | 'Custom';
+  category: 'Trend' | 'Oscillator' | 'Volatility' | 'Smart Money' | 'Order Flow' | 'Strategies' | 'Sessions' | 'Chart Patterns' | 'Custom';
   description: string;
   overlay: boolean;
   code: string;
@@ -23,6 +23,36 @@ export interface IndicatorPreset {
 }
 
 export const BUILTIN_INDICATORS: IndicatorPreset[] = [
+  {
+    id: 'volume',
+    name: 'Volume',
+    category: 'Order Flow',
+    description: 'Trading volume histogram highlighting bullish (up) and bearish (down) bar activity with a customizable 20-period Volume Moving Average (SMA) line.',
+    overlay: false,
+    defaultParams: {
+      ma_length: 20,
+      show_ma: true,
+      up_color: '#26a69a',
+      down_color: '#ef5350',
+      ma_color: '#2962ff'
+    },
+    paramDefinitions: [
+      { key: 'ma_length', name: 'Volume MA Length (SMA)', type: 'int', default: 20, min: 1, max: 100, category: 'Calculations' },
+      { key: 'show_ma', name: 'Show Volume Moving Average (SMA)', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'up_color', name: 'Bullish Volume Color', type: 'color', default: '#26a69a', category: 'Visuals' },
+      { key: 'down_color', name: 'Bearish Volume Color', type: 'color', default: '#ef5350', category: 'Visuals' },
+      { key: 'ma_color', name: 'Volume MA Line Color', type: 'color', default: '#2962ff', category: 'Visuals' }
+    ],
+    code: `//@version=5
+indicator("Volume", overlay=false)
+ma_len = input.int(20, "Volume MA Length")
+show_ma = input.bool(true, "Show MA")
+up_col = input.color(#26a69a, "Up Color")
+down_col = input.color(#ef5350, "Down Color")
+ma_col = input.color(#2962ff, "MA Color")
+plot(volume, "Volume", style=plot.style_columns, color=close >= open ? up_col : down_col)
+plot(ta.sma(volume, ma_len), "Volume MA", color=ma_col)`
+  },
   {
     id: 'rsi_14',
     name: 'Relative Strength Index (RSI)',
@@ -476,6 +506,229 @@ show_rr_boxes = input.bool(true, "Show R:R Boxes")
 filter_trend = input.bool(true, "Filter Macro Trend")
 hma = ta.hma(close, hma_len)
 plot(hma, "HMA Baseline", color=close > hma ? color.green : color.red)`
+  },
+  {
+    id: 'liquidity_sweep',
+    name: 'Liquidity Sweep + CISD + FVG',
+    category: 'Smart Money',
+    description: 'Smart Money Liquidity Sweep + CISD (Change in State of Delivery) + FVG (Fair Value Gap) strategy. Detects liquidity sweeps, CISD transition levels, and opposing Fair Value Gap entry zones.',
+    overlay: true,
+    defaultParams: {
+      pivot_length: 5,
+      eqh_eql_tolerance: 0.05,
+      min_wick_ratio: 0.8,
+      filter_volume: false,
+      volume_mult: 1.0,
+      show_cisd: true,
+      show_fvg: true,
+      show_liquidity_lines: true,
+      show_sweep_labels: true,
+      max_active_pools: 15,
+      sweep_color: '#787b86',
+      cisd_color: '#3b82f6',
+      fvg_color: '#26a69a'
+    },
+    paramDefinitions: [
+      { key: 'pivot_length', name: 'Swing Pivot Length (ta.pivothigh / low)', type: 'int', default: 5, min: 2, max: 20, category: 'Calculations' },
+      { key: 'eqh_eql_tolerance', name: 'Equal Highs/Lows Tolerance (%)', type: 'float', default: 0.05, min: 0.01, max: 0.5, step: 0.01, category: 'Calculations' },
+      { key: 'min_wick_ratio', name: 'Rejection Wick Threshold Ratio', type: 'float', default: 0.8, min: 0.2, max: 3.0, step: 0.1, category: 'Calculations' },
+      { key: 'show_cisd', name: 'Show CISD (Change in State of Delivery)', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'show_fvg', name: 'Show FVG (Fair Value Gap Zones)', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'show_liquidity_lines', name: 'Show Swept Liquidity Lines', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'show_sweep_labels', name: 'Show "Liquidity Sweep" Text Callouts', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'max_active_pools', name: 'Maximum Active Liquidity Pools', type: 'int', default: 15, min: 3, max: 30, category: 'Calculations' },
+      { key: 'sweep_color', name: 'Liquidity Sweep Line Color', type: 'color', default: '#787b86', category: 'Visuals' },
+      { key: 'cisd_color', name: 'CISD Line Color', type: 'color', default: '#3b82f6', category: 'Visuals' },
+      { key: 'fvg_color', name: 'FVG Box Color', type: 'color', default: '#26a69a', category: 'Visuals' }
+    ],
+    code: `//@version=5
+indicator("Liquidity Sweep + CISD + FVG", overlay=true)
+pivot_len = input.int(5, "Swing Pivot Length")
+show_cisd = input.bool(true, "Show CISD")
+show_fvg = input.bool(true, "Show FVG")`
+  },
+  {
+    id: 'liquidity_swings',
+    name: 'Liquidity Swings',
+    category: 'Smart Money',
+    description: 'Identifies institutional Buy and Sell liquidity swing extremes, highlighting resting volume pools, shaded liquidity footprint blocks, and extending target liquidity levels.',
+    overlay: true,
+    defaultParams: {
+      pivot_length: 5,
+      show_volume: true,
+      show_liquidity_blocks: true,
+      show_extend_lines: true,
+      show_labels: true,
+      max_swings: 15,
+      high_swing_color: '#ef4444',
+      low_swing_color: '#00b4d8'
+    },
+    paramDefinitions: [
+      { key: 'pivot_length', name: 'Swing Pivot Length (Lookback/Forward)', type: 'int', default: 5, min: 2, max: 30, category: 'Calculations', description: 'Number of bars left and right to confirm institutional swing highs and lows.' },
+      { key: 'show_volume', name: 'Display Resting Volume Metrics (e.g. 23.823K)', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'show_liquidity_blocks', name: 'Shade Swing Liquidity Blocks', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'show_extend_lines', name: 'Extend Liquidity Levels Horizontally', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'show_labels', name: 'Show Buy / Sell Tags', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'max_swings', name: 'Max Active Liquidity Swings', type: 'int', default: 15, min: 3, max: 40, category: 'Calculations' },
+      { key: 'high_swing_color', name: 'Swing High / Sell Liquidity Color', type: 'color', default: '#ef4444', category: 'Visuals' },
+      { key: 'low_swing_color', name: 'Swing Low / Buy Liquidity Color', type: 'color', default: '#00b4d8', category: 'Visuals' }
+    ],
+    code: `//@version=5
+indicator("Liquidity Swings", overlay=true)
+pivot_len = input.int(5, "Swing Pivot Length")
+show_vol = input.bool(true, "Show Volume")
+show_blocks = input.bool(true, "Show Liquidity Blocks")
+show_lines = input.bool(true, "Extend Lines")`
+  },
+  {
+    id: 'bullish_flag',
+    name: 'Bullish Flag Pattern',
+    category: 'Chart Patterns',
+    description: 'Detects Bullish Flags, Bullish Wedge Flags, and Bullish Pennants with impulse flagpole tracking, descending consolidation channels, breakout confirmation, and 100% measured move target projections.',
+    overlay: true,
+    defaultParams: {
+      show_flags: true,
+      show_wedges: true,
+      show_pennants: true,
+      pole_strength_atr: 2.2,
+      pole_min_bars: 3,
+      pole_max_bars: 15,
+      flag_min_bars: 4,
+      flag_max_bars: 20,
+      max_patterns: 2,
+      show_flagpole: true,
+      show_channel_lines: true,
+      show_channel_shading: false,
+      show_target: true,
+      show_labels: true,
+      bull_color: '#26a69a',
+      target_color: '#00e676'
+    },
+    paramDefinitions: [
+      { key: 'pole_strength_atr', name: 'Impulse Flagpole ATR Multiplier', type: 'float', default: 2.2, min: 1.0, max: 4.0, step: 0.1, category: 'Calculations', description: 'Sensitivity to detect impulsive upward flagpole surges.' },
+      { key: 'pole_min_bars', name: 'Minimum Flagpole Bars', type: 'int', default: 3, min: 2, max: 10, category: 'Calculations' },
+      { key: 'pole_max_bars', name: 'Maximum Flagpole Bars', type: 'int', default: 15, min: 5, max: 30, category: 'Calculations' },
+      { key: 'flag_min_bars', name: 'Minimum Flag Consolidation Bars', type: 'int', default: 4, min: 3, max: 15, category: 'Calculations' },
+      { key: 'flag_max_bars', name: 'Maximum Flag Consolidation Bars', type: 'int', default: 20, min: 6, max: 35, category: 'Calculations' },
+      { key: 'max_patterns', name: 'Max Displayed Patterns', type: 'int', default: 2, min: 1, max: 5, category: 'Calculations' },
+      { key: 'show_flags', name: 'Show Bullish Flags (Descending Parallel Channel)', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'show_wedges', name: 'Show Bullish Wedge Flags (Converging Downward)', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'show_pennants', name: 'Show Bullish Pennants (Symmetrical Triangle)', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'show_target', name: 'Show 100% Measured Move Target Lines', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'show_flagpole', name: 'Draw Flagpole Surge Vectors', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'show_channel_lines', name: 'Draw Flag Channel Boundary Lines', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'show_labels', name: 'Show Pattern Badges & Target Callouts', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'bull_color', name: 'Bullish Pattern Color', type: 'color', default: '#26a69a', category: 'Visuals' },
+      { key: 'target_color', name: 'Target Projection Color', type: 'color', default: '#00e676', category: 'Visuals' }
+    ],
+    code: `//@version=5
+indicator("Bullish Flag Pattern", overlay=true)
+pole_atr = input.float(2.2, "Pole ATR Multiplier")
+show_target = input.bool(true, "Show Measured Target")
+show_wedges = input.bool(true, "Show Bullish Wedges")
+show_pennants = input.bool(true, "Show Bullish Pennants")`
+  },
+  {
+    id: 'bearish_flag',
+    name: 'Bearish Flag Pattern',
+    category: 'Chart Patterns',
+    description: 'Detects Bearish Flags, Bearish Wedge Flags, and Bearish Pennants with downward plunge flagpole tracking, ascending consolidation channels, breakdown confirmation, and measured move target projections.',
+    overlay: true,
+    defaultParams: {
+      show_flags: true,
+      show_wedges: true,
+      show_pennants: true,
+      pole_strength_atr: 2.2,
+      pole_min_bars: 3,
+      pole_max_bars: 15,
+      flag_min_bars: 4,
+      flag_max_bars: 20,
+      max_patterns: 2,
+      show_flagpole: true,
+      show_channel_lines: true,
+      show_channel_shading: false,
+      show_target: true,
+      show_labels: true,
+      bear_color: '#ef5350',
+      target_color: '#ff5252'
+    },
+    paramDefinitions: [
+      { key: 'pole_strength_atr', name: 'Impulse Flagpole ATR Multiplier', type: 'float', default: 2.2, min: 1.0, max: 4.0, step: 0.1, category: 'Calculations', description: 'Sensitivity to detect impulsive downward flagpole drops.' },
+      { key: 'pole_min_bars', name: 'Minimum Flagpole Bars', type: 'int', default: 3, min: 2, max: 10, category: 'Calculations' },
+      { key: 'pole_max_bars', name: 'Maximum Flagpole Bars', type: 'int', default: 15, min: 5, max: 30, category: 'Calculations' },
+      { key: 'flag_min_bars', name: 'Minimum Flag Consolidation Bars', type: 'int', default: 4, min: 3, max: 15, category: 'Calculations' },
+      { key: 'flag_max_bars', name: 'Maximum Flag Consolidation Bars', type: 'int', default: 20, min: 6, max: 35, category: 'Calculations' },
+      { key: 'max_patterns', name: 'Max Displayed Patterns', type: 'int', default: 2, min: 1, max: 5, category: 'Calculations' },
+      { key: 'show_flags', name: 'Show Bearish Flags (Ascending Parallel Channel)', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'show_wedges', name: 'Show Bearish Wedge Flags (Converging Upward)', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'show_pennants', name: 'Show Bearish Pennants (Symmetrical Triangle)', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'show_target', name: 'Show 100% Measured Move Target Lines', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'show_flagpole', name: 'Draw Flagpole Drop Vectors', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'show_channel_lines', name: 'Draw Flag Channel Boundary Lines', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'show_labels', name: 'Show Pattern Badges & Target Callouts', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'bear_color', name: 'Bearish Pattern Color', type: 'color', default: '#ef5350', category: 'Visuals' },
+      { key: 'target_color', name: 'Target Projection Color', type: 'color', default: '#ff5252', category: 'Visuals' }
+    ],
+    code: `//@version=5
+indicator("Bearish Flag Pattern", overlay=true)
+pole_atr = input.float(2.2, "Pole ATR Multiplier")
+show_target = input.bool(true, "Show Measured Target")
+show_wedges = input.bool(true, "Show Bearish Wedges")
+show_pennants = input.bool(true, "Show Bearish Pennants")`
+  },
+  {
+    id: 'flag_patterns',
+    name: 'Bullish & Bearish Flags',
+    category: 'Chart Patterns',
+    description: 'All-in-one chart pattern engine identifying both Bullish and Bearish Flags, Wedges, and Pennants with dynamic flagpole tracking, consolidation channel boundaries, breakout signals, and measured move profit projections.',
+    overlay: true,
+    defaultParams: {
+      detect_bullish: true,
+      detect_bearish: true,
+      show_flags: true,
+      show_wedges: true,
+      show_pennants: true,
+      pole_strength_atr: 2.2,
+      pole_min_bars: 3,
+      pole_max_bars: 15,
+      flag_min_bars: 4,
+      flag_max_bars: 20,
+      max_patterns: 2,
+      show_flagpole: true,
+      show_channel_lines: true,
+      show_channel_shading: false,
+      show_target: true,
+      show_labels: true,
+      bull_color: '#26a69a',
+      bear_color: '#ef5350',
+      target_color: '#3b82f6'
+    },
+    paramDefinitions: [
+      { key: 'detect_bullish', name: 'Detect Bullish Flag Setups', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'detect_bearish', name: 'Detect Bearish Flag Setups', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'pole_strength_atr', name: 'Impulse Flagpole ATR Multiplier', type: 'float', default: 2.2, min: 1.0, max: 4.0, step: 0.1, category: 'Calculations', description: 'Sensitivity to detect impulsive flagpole moves.' },
+      { key: 'pole_min_bars', name: 'Minimum Flagpole Bars', type: 'int', default: 3, min: 2, max: 10, category: 'Calculations' },
+      { key: 'pole_max_bars', name: 'Maximum Flagpole Bars', type: 'int', default: 15, min: 5, max: 30, category: 'Calculations' },
+      { key: 'flag_min_bars', name: 'Minimum Flag Consolidation Bars', type: 'int', default: 4, min: 3, max: 15, category: 'Calculations' },
+      { key: 'flag_max_bars', name: 'Maximum Flag Consolidation Bars', type: 'int', default: 20, min: 6, max: 35, category: 'Calculations' },
+      { key: 'max_patterns', name: 'Max Displayed Patterns', type: 'int', default: 2, min: 1, max: 5, category: 'Calculations' },
+      { key: 'show_flags', name: 'Show Standard Flags (Parallel Channels)', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'show_wedges', name: 'Show Wedge Flags (Converging Slopes)', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'show_pennants', name: 'Show Pennants (Symmetrical Triangles)', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'show_target', name: 'Show 100% Measured Move Target Lines', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'show_flagpole', name: 'Draw Flagpole Surge Vectors', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'show_channel_lines', name: 'Draw Flag Channel Boundary Lines', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'show_labels', name: 'Show Pattern Badges & Target Callouts', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'bull_color', name: 'Bullish Pattern Color', type: 'color', default: '#26a69a', category: 'Visuals' },
+      { key: 'bear_color', name: 'Bearish Pattern Color', type: 'color', default: '#ef5350', category: 'Visuals' },
+      { key: 'target_color', name: 'Target Line Color', type: 'color', default: '#3b82f6', category: 'Visuals' }
+    ],
+    code: `//@version=5
+indicator("Bullish & Bearish Flags", overlay=true)
+detect_bull = input.bool(true, "Detect Bullish")
+detect_bear = input.bool(true, "Detect Bearish")
+pole_atr = input.float(2.2, "Pole ATR Multiplier")
+show_target = input.bool(true, "Show Measured Target")`
   }
 ];
 

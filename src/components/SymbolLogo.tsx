@@ -239,6 +239,44 @@ const SyntheticPulseIcon = ({ color = '#8b5cf6', text = 'V' }: { color?: string;
   </svg>
 );
 
+// Boom Index Icon (Vibrant Emerald Spike Icon)
+const BoomIcon = () => (
+  <svg viewBox="0 0 32 32" className="w-full h-full">
+    <defs>
+      <linearGradient id="boom-gradient" x1="0%" y1="100%" x2="100%" y2="0%">
+        <stop offset="0%" stopColor="#064e3b" />
+        <stop offset="50%" stopColor="#059669" />
+        <stop offset="100%" stopColor="#10b981" />
+      </linearGradient>
+    </defs>
+    <circle cx="16" cy="16" r="16" fill="url(#boom-gradient)" />
+    {/* Upward explosive spike bolt */}
+    <path
+      d="M17 5L8 17H14.5L12.5 27L23.5 13H16L18.5 5Z"
+      fill="#ffffff"
+    />
+  </svg>
+);
+
+// Crash Index Icon (Vibrant Crimson Drop Icon)
+const CrashIcon = () => (
+  <svg viewBox="0 0 32 32" className="w-full h-full">
+    <defs>
+      <linearGradient id="crash-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#881337" />
+        <stop offset="50%" stopColor="#dc2626" />
+        <stop offset="100%" stopColor="#ef4444" />
+      </linearGradient>
+    </defs>
+    <circle cx="16" cy="16" r="16" fill="url(#crash-gradient)" />
+    {/* Downward crash drop bolt */}
+    <path
+      d="M15 27L24 15H17.5L19.5 5L8.5 19H16L13.5 27Z"
+      fill="#ffffff"
+    />
+  </svg>
+);
+
 function getCurrencyComponent(code: string): React.ReactNode {
   const upper = code.toUpperCase();
   if (upper === 'EUR') return <EUFlag />;
@@ -276,7 +314,29 @@ export const SymbolLogo: React.FC<SymbolLogoProps> = ({ symbol, size = 'md', cla
 
   const sz = sizeMap[size] || sizeMap.md;
 
-  // 1. Synthetic / Volatility Indices (e.g. 1HZ100V, R_100, 1HZ10V, etc.)
+  // 1. Boom Indices (BOOM50, BOOM100, BOOM1000, etc.)
+  if (clean.startsWith('BOOM')) {
+    return (
+      <div className={`relative inline-flex items-center justify-center shrink-0 ${sz.outer} ${className}`}>
+        <div className="w-full h-full rounded-full overflow-hidden shadow-sm ring-1 ring-emerald-500/30">
+          <BoomIcon />
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Crash Indices (CRASH50, CRASH100, CRASH1000, etc.)
+  if (clean.startsWith('CRASH')) {
+    return (
+      <div className={`relative inline-flex items-center justify-center shrink-0 ${sz.outer} ${className}`}>
+        <div className="w-full h-full rounded-full overflow-hidden shadow-sm ring-1 ring-rose-500/30">
+          <CrashIcon />
+        </div>
+      </div>
+    );
+  }
+
+  // 3. Synthetic / Volatility Indices (e.g. 1HZ100V, R_100, 1HZ10V, etc.)
   if (
     clean.startsWith('1HZ') || 
     clean.startsWith('R_') || 

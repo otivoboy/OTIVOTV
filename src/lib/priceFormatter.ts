@@ -29,23 +29,28 @@ export function getSymbolPriceFormat(symbol: string, samplePrice?: number): Symb
     return { type: 'price', precision: 3, minMove: 0.001 };
   }
 
-  // 3. Volatility 50 Index (R_50, 1HZ50V) - Exactly 4 decimal places
-  if (clean.includes('50') || clean === 'R_50' || clean === '1HZ50V') {
+  // 3. Boom and Crash Indices (BOOM50, BOOM1000, CRASH50, CRASH1000, etc.) - 2 decimal places
+  if (clean.startsWith('BOOM') || clean.startsWith('CRASH')) {
+    return { type: 'price', precision: 2, minMove: 0.01 };
+  }
+
+  // 4. Volatility 50 Index (R_50, 1HZ50V) - Exactly 4 decimal places
+  if (clean === 'R_50' || clean === '1HZ50V' || clean === 'VOL_50') {
     return { type: 'price', precision: 4, minMove: 0.0001 };
   }
 
-  // 4. Volatility 75 Index (R_75, 1HZ75V) - 4 decimal places
-  if (clean.includes('75') || clean === 'R_75' || clean === '1HZ75V') {
+  // 5. Volatility 75 Index (R_75, 1HZ75V) - 4 decimal places
+  if (clean === 'R_75' || clean === '1HZ75V' || clean === 'VOL_75') {
     return { type: 'price', precision: 4, minMove: 0.0001 };
   }
 
-  // 5. Volatility 10 / 25 Index - 3 decimal places
+  // 6. Volatility 10 / 25 Index - 3 decimal places
   if (clean.includes('10V') || clean.includes('25V') || clean === 'R_10' || clean === 'R_25' || clean === '1HZ10V' || clean === '1HZ25V') {
     return { type: 'price', precision: 3, minMove: 0.001 };
   }
 
-  // 6. Volatility 100 Index (1HZ100V, R_100) - 2 decimal places
-  if (clean.includes('100') || clean === 'R_100' || clean === '1HZ100V') {
+  // 7. Volatility 100 Index (1HZ100V, R_100) - 2 decimal places
+  if (clean.includes('100V') || clean === 'R_100' || clean === '1HZ100V') {
     return { type: 'price', precision: 2, minMove: 0.01 };
   }
 

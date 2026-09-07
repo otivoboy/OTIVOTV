@@ -35,14 +35,24 @@ export const OscillatorPanel: React.FC<OscillatorPanelProps> = ({
   const lastPoint = primaryPlot[primaryPlot.length - 1];
   const isRSI = indicator.name.toLowerCase().includes('rsi');
   const isDelta = indicator.name.toLowerCase().includes('delta');
+  const isVolume = (indicator.name.toLowerCase() === 'volume' || indicator.id.toLowerCase().includes('volume') || indicator.id.toLowerCase().includes('default-vol')) && !isDelta && !indicator.name.toLowerCase().includes('liquidity');
+
+  const formatVol = (val: number | null | undefined) => {
+    if (val === null || val === undefined || isNaN(val)) return '--';
+    if (val >= 1000000) return `${(val / 1000000).toFixed(2)}M`;
+    if (val >= 1000) return `${(val / 1000).toFixed(2)}K`;
+    return val.toFixed(0);
+  };
 
   const lastValue = isDelta
     ? (indicator.deltaData && indicator.deltaData.length > 0 
         ? `${indicator.deltaData[indicator.deltaData.length - 1].delta >= 0 ? '+' : ''}${indicator.deltaData[indicator.deltaData.length - 1].delta} (CVD: ${indicator.deltaData[indicator.deltaData.length - 1].cvd})`
         : (lastPoint?.value !== undefined && lastPoint?.value !== null ? lastPoint.value.toFixed(0) : '--'))
+    : isVolume
+    ? formatVol(lastPoint?.value)
     : (lastPoint && lastPoint.value !== null && !isNaN(lastPoint.value) ? lastPoint.value.toFixed(2) : '--');
 
-  const plotColor = isRSI ? '#ab47bc' : (isDelta ? '#ffffff' : (lastPoint?.color || '#2962ff'));
+  const plotColor = isRSI ? '#ab47bc' : (isDelta ? '#ffffff' : isVolume ? (lastPoint?.color || '#26a69a') : (lastPoint?.color || '#2962ff'));
 
   const indicatorRef = useRef(indicator);
   const chartRef = useRef(chart);
@@ -118,11 +128,11 @@ export const OscillatorPanel: React.FC<OscillatorPanelProps> = ({
     const plotWidth = Math.max(10, width - rightScaleWidth);
 
     // Subtle background
-    ctx.fillStyle = currentDark ? '#000000' : '#ffffff';
+    ctx.fillStyle = currentDark ? '#131722' : '#ffffff';
     ctx.fillRect(0, 0, width, height);
 
     // Right scale border
-    ctx.strokeStyle = currentDark ? '#27272a' : '#e0e3eb';
+    ctx.strokeStyle = currentDark ? '#2a2e39' : '#e0e3eb';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(plotWidth, 0);
@@ -497,7 +507,109 @@ export const OscillatorPanel: React.FC<OscillatorPanelProps> = ({
       ctx.restore();
     }
     // =========================================================
-    // C. GENERAL OSCILLATORS (DYNAMIC RANGE)
+    // C. VOLUME OSCILLATOR (TradingView Style Columns + Volume MA)
+    // =========================================================
+    else if (isVolume) {
+      const volSeries = currentIndicator.plots[0] || [];
+      const maSeries = currentIndicator.plots[1] || [];
+
+      let maxVol = 100;
+      volSeries.forEach(pt => {
+        if (pt.value !== null && !isNaN(pt.value)) {
+          maxVol = Math.max(maxVol, pt.value);
+        }
+      });
+      maSeries.forEach(pt => {
+        if (pt.value !== null && !isNaN(pt.value)) {
+          maxVol = Math.max(maxVol, pt.value);
+        }
+      });
+
+      const headRoom = maxVol * 1.15;
+      const bottomY = height - 12;
+      const usableH = bottomY - paddingY;
+      const valToY = (v: number) => bottomY - (v / Math.max(1, headRoom)) * usableH;
+
+      // 1. Draw Volume Columns
+      ctx.save();
+      for (let i = 0; i < volSeries.length; i++) {
+        const pt = volSeries[i];
+        if (pt.value === null || isNaN(pt.value) || pt.value <= 0) continue;
+        const x = getXCoord(pt.time as number, i);
+        if (x === null || x < -20 || x > plotWidth + 20) continue;
+
+        let barW = 4;
+        if (i < volSeries.length - 1) {
+          const nextX = getXCoord(volSeries[i + 1].time as number, i + 1);
+          if (nextX !== null && nextX > x) {
+            barW = Math.max(1.5, Math.min(22, (nextX - x) * 0.75));
+          }
+        }
+        const barH = (pt.value / Math.max(1, headRoom)) * usableH;
+        ctx.fillStyle = pt.color || '#26a69a';
+        ctx.fillRect(x - barW / 2, bottomY - barH, barW, Math.max(1.5, barH));
+      }
+      ctx.restore();
+
+      // 2. Draw Volume Moving Average Line (if present)
+      if (maSeries.length > 1) {
+        ctx.save();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = currentIndicator.params?.ma_color || '#2962ff';
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        let started = false;
+        for (let i = 0; i < maSeries.length; i++) {
+          const pt = maSeries[i];
+          if (pt.value === null || isNaN(pt.value)) continue;
+          const x = getXCoord(pt.time as number, i);
+          if (x === null) continue;
+          const y = valToY(pt.value);
+          if (!started) {
+            ctx.moveTo(x, y);
+            started = true;
+          } else {
+            ctx.lineTo(x, y);
+          }
+        }
+        if (started) ctx.stroke();
+        ctx.restore();
+      }
+
+      // 3. Right Scale Axis labels (e.g. 50K, 25K, 0)
+      ctx.save();
+      ctx.font = '10px "JetBrains Mono", monospace';
+      ctx.fillStyle = currentDark ? '#94a3b8' : '#64748b';
+      ctx.textAlign = 'left';
+
+      const formatVolLabel = (v: number) => {
+        if (v >= 1000000) return `${(v / 1000000).toFixed(1)}M`;
+        if (v >= 1000) return `${(v / 1000).toFixed(0)}K`;
+        return `${Math.round(v)}`;
+      };
+
+      const topVal = headRoom * 0.9;
+      const midVal = headRoom * 0.45;
+      ctx.fillText(formatVolLabel(topVal), plotWidth + 6, valToY(topVal) + 3.5);
+      ctx.fillText(formatVolLabel(midVal), plotWidth + 6, valToY(midVal) + 3.5);
+      ctx.fillText('0', plotWidth + 6, bottomY + 3.5);
+
+      // Last value badge on right scale
+      const lastVolPt = volSeries[volSeries.length - 1];
+      if (lastVolPt && lastVolPt.value !== null && !isNaN(lastVolPt.value)) {
+        const pillY = Math.max(10, Math.min(height - 10, valToY(lastVolPt.value)));
+        ctx.fillStyle = lastVolPt.color || '#26a69a';
+        ctx.fillRect(plotWidth + 1, pillY - 9, rightScaleWidth - 2, 18);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 9.5px "JetBrains Mono", monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText(formatVolLabel(lastVolPt.value), plotWidth + 4, pillY + 3.5);
+      }
+      ctx.restore();
+    }
+    // =========================================================
+    // D. GENERAL OSCILLATORS (DYNAMIC RANGE)
     // =========================================================
     else {
       let minVal = Infinity;
@@ -618,22 +730,22 @@ export const OscillatorPanel: React.FC<OscillatorPanelProps> = ({
 
   return (
     <div 
-      className="w-full border-t border-tv-border bg-tv-bg relative flex flex-col select-none shrink-0 group/panel"
+      className="w-full border-t border-[#e0e3eb] dark:border-[#2a2e39] bg-white dark:bg-[#131722] relative flex flex-col select-none shrink-0 group/panel"
       style={{ height: `${panelHeight}px` }}
     >
       {/* Top Resize Drag Handle */}
       <div 
         onMouseDown={handleMouseDownResize}
-        className="absolute top-0 left-0 right-0 h-1.5 cursor-ns-resize z-20 hover:bg-tv-accent/50 transition-colors flex items-center justify-center"
+        className="absolute top-0 left-0 right-0 h-1.5 cursor-ns-resize z-20 hover:bg-[#2962ff]/50 transition-colors flex items-center justify-center"
         title="Drag to resize oscillator pane"
       >
-        <div className="w-12 h-0.5 bg-tv-border rounded-full group-hover/panel:bg-tv-accent opacity-0 group-hover/panel:opacity-100 transition-opacity" />
+        <div className="w-12 h-0.5 bg-[#e0e3eb] dark:bg-[#2a2e39] rounded-full group-hover/panel:bg-[#2962ff] opacity-0 group-hover/panel:opacity-100 transition-opacity" />
       </div>
 
       {/* Panel Top Header / Legend */}
-      <div className="absolute top-2 left-3 z-10 flex items-center gap-2 pointer-events-auto bg-tv-bg/95 backdrop-blur-xs px-2 py-0.5 rounded border border-tv-border/50 shadow-xs">
-        <span className="text-xs font-semibold text-tv-text flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: plotColor }} />
+      <div className="absolute top-2 left-3 z-10 flex items-center gap-2 pointer-events-auto bg-white/90 dark:bg-[#131722]/90 backdrop-blur-sm px-2 py-0.5 rounded-md border border-[#e0e3eb] dark:border-[#2a2e39] shadow-xs">
+        <span className="text-xs font-semibold text-[#131722] dark:text-[#d1d4dc] flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: plotColor }} />
           {indicator.name}
         </span>
         {!isHidden && (
@@ -644,21 +756,21 @@ export const OscillatorPanel: React.FC<OscillatorPanelProps> = ({
         <div className="flex items-center gap-0.5 ml-1">
           <button
             onClick={() => onToggleVisibility(indicator.id)}
-            className="p-1 hover:bg-tv-hover rounded text-tv-muted hover:text-tv-text transition-colors"
+            className="p-1 hover:bg-[#f0f3fa] dark:hover:bg-[#2a2e39] rounded text-[#707584] dark:text-[#787b86] hover:text-[#131722] dark:hover:text-[#d1d4dc] transition-colors cursor-pointer"
             title={isHidden ? 'Show' : 'Hide'}
           >
             {isHidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
           </button>
           <button
             onClick={() => onOpenSettings(indicator.id)}
-            className="p-1 hover:bg-tv-hover rounded text-tv-muted hover:text-tv-text transition-colors"
+            className="p-1 hover:bg-[#f0f3fa] dark:hover:bg-[#2a2e39] rounded text-[#707584] dark:text-[#787b86] hover:text-[#131722] dark:hover:text-[#d1d4dc] transition-colors cursor-pointer"
             title="Settings"
           >
             <Settings className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => onRemove(indicator.id)}
-            className="p-1 hover:bg-tv-hover rounded text-tv-muted hover:text-red-500 transition-colors"
+            className="p-1 hover:bg-[#f0f3fa] dark:hover:bg-[#2a2e39] rounded text-[#707584] dark:text-[#787b86] hover:text-red-500 dark:hover:text-red-400 transition-colors cursor-pointer"
             title="Close Pane"
           >
             <X className="w-3.5 h-3.5" />

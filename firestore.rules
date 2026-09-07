@@ -1,0 +1,89 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global safety net - default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidUser(data) {
+      return data.id is string && data.id.size() <= 128 && data.id == request.auth.uid &&
+             data.createdAt is string && data.createdAt.size() <= 64 &&
+             data.lastLoginAt is string && data.lastLoginAt.size() <= 64 &&
+             (!('phoneNumber' in data) || (data.phoneNumber is string && data.phoneNumber.size() <= 32)) &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 128)) &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 128)) &&
+             (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1024));
+    }
+
+    function isValidSettings(data, userId) {
+      return data.userId is string && data.userId == userId && data.userId == request.auth.uid &&
+             (data.theme == 'light' || data.theme == 'dark') &&
+             data.updatedAt is string && data.updatedAt.size() <= 64 &&
+             (!('activeSymbol' in data) || (data.activeSymbol is string && data.activeSymbol.size() <= 64)) &&
+             (!('activeTimeframe' in data) || (data.activeTimeframe is string && data.activeTimeframe.size() <= 16)) &&
+             (!('chartType' in data) || (data.chartType is string && data.chartType.size() <= 32)) &&
+             (!('currentLayoutName' in data) || (data.currentLayoutName is string && data.currentLayoutName.size() <= 128)) &&
+             (!('multiLayout' in data) || (data.multiLayout is string && data.multiLayout.size() <= 16)) &&
+             (!('taTimeframe' in data) || (data.taTimeframe is string && data.taTimeframe.size() <= 16)) &&
+             (!('pivotMode' in data) || (data.pivotMode is string && data.pivotMode.size() <= 32)) &&
+             (!('activePanel' in data) || data.activePanel == null || (data.activePanel is string && data.activePanel.size() <= 32));
+    }
+
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false; // Deny listing users collection to protect user privacy
+
+      allow create: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       isValidUser(incoming());
+
+      allow update: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       isValidUser(incoming()) &&
+                       incoming().id == existing().id &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['lastLoginAt', 'phoneNumber', 'email', 'displayName', 'photoURL']);
+
+      allow delete: if isOwner(userId) && isValidId(userId);
+
+      // User Settings Subcollection (Cross-browser preferences, indicators, drawings, alerts)
+      match /settings/{settingId} {
+        allow get, list: if isOwner(userId) && isValidId(userId) && isValidId(settingId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(userId) &&
+                         isValidId(settingId) &&
+                         isValidSettings(incoming(), userId);
+
+        allow update: if isOwner(userId) &&
+                         isValidId(userId) &&
+                         isValidId(settingId) &&
+                         isValidSettings(incoming(), userId) &&
+                         incoming().userId == existing().userId;
+
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(settingId);
+      }
+    }
+  }
+}

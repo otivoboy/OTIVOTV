@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback, Fragment } from 'react';
+import { createPortal } from 'react-dom';
 import { io } from 'socket.io-client';
 import { derivClient, generateSeedCandles } from './lib/derivClient';
 import { 
@@ -40,7 +41,6 @@ import {
   Magnet,
   Lock,
   EyeOff,
-  Trash2,
   List,
   Square,
   TrendingUp,
@@ -56,7 +56,11 @@ import {
   Code2,
   MoreHorizontal,
   Gauge,
-  X
+  X,
+  Phone,
+  LogOut,
+  ShieldCheck,
+  User
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Editor from 'react-simple-code-editor';
@@ -64,6 +68,9 @@ import { highlight, languages } from 'prismjs';
 import 'prismjs/components/prism-clike';
 import 'prismjs/components/prism-javascript';
 import './index.css';
+
+import { useAuth } from './context/AuthContext';
+import { PhoneLoginScreen } from './components/Auth/PhoneLoginScreen';
 
 // Simple Pine Script highlighter definition (based on JS/C)
 const pinelanguages = {
@@ -82,7 +89,6 @@ import { SymbolLogo } from './components/SymbolLogo';
 import { AlertsModal } from './components/Charting/AlertsModal';
 import { TriggeredAlertToast } from './components/Charting/TriggeredAlertToast';
 import { BarReplayControl } from './components/Charting/BarReplayControl';
-import { LayoutSelectorModal } from './components/Charting/LayoutSelectorModal';
 import { SaveLayoutModal } from './components/Charting/SaveLayoutModal';
 import { QuickSearchModal } from './components/Charting/QuickSearchModal';
 import { ChartSettingsModal } from './components/Charting/ChartSettingsModal';
@@ -94,6 +100,7 @@ import { Tick, Candle } from './types';
 
 // Header Component
 const Header = () => {
+  const { user, signOutUser } = useAuth();
   const { 
     activeSymbol, activeTimeframe, setTimeframe, setSymbol, theme, toggleTheme, 
     savedScripts, applyScript, activeIndicators, addIndicator, removeIndicator,
@@ -101,7 +108,6 @@ const Header = () => {
     alerts, setAlertModalOpen,
     replayState, startReplay, stopReplay,
     undoStack, redoStack, undoDrawing, redoDrawing,
-    setLayoutSelectorOpen, multiLayout,
     setSaveLayoutModalOpen, currentLayoutName,
     setQuickSearchOpen,
     setChartSettingsOpen,
@@ -137,13 +143,16 @@ const Header = () => {
   const timeframeBtnRef = useRef<HTMLButtonElement>(null);
   const chartTypeBtnRef = useRef<HTMLButtonElement>(null);
   const indicatorsBtnRef = useRef<HTMLButtonElement>(null);
+  const profileBtnRef = useRef<HTMLButtonElement>(null);
 
   const [symbolMenuPos, setSymbolMenuPos] = useState({ left: 16, top: 42 });
   const [timeframeMenuPos, setTimeframeMenuPos] = useState({ left: 160, top: 42 });
   const [chartTypeMenuPos, setChartTypeMenuPos] = useState({ left: 220, top: 42 });
   const [indicatorsMenuPos, setIndicatorsMenuPos] = useState({ left: 280, top: 42 });
+  const [profileMenuPos, setProfileMenuPos] = useState({ right: 16, top: 46 });
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   
-  const timeframes = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '8h', '1d', '1w'];
+  const timeframes = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d', '1w'];
   const quickTimeframes = ['1m', '5m', '15m', '1h', '4h', '1d'];
 
   const closeAllMenus = useCallback(() => {
@@ -151,6 +160,7 @@ const Header = () => {
     setIsTimeframeMenuOpen(false);
     setIsChartTypeMenuOpen(false);
     setIsIndicatorsMenuOpen(false);
+    setIsProfileMenuOpen(false);
   }, []);
 
   // Listen to Escape key to close any open dropdowns
@@ -220,19 +230,45 @@ const Header = () => {
     setIsSymbolMenuOpen(false);
     setIsTimeframeMenuOpen(false);
     setIsChartTypeMenuOpen(false);
+    setIsProfileMenuOpen(false);
+  };
+
+  const toggleProfileMenu = () => {
+    if (!isProfileMenuOpen && profileBtnRef.current) {
+      const rect = profileBtnRef.current.getBoundingClientRect();
+      setProfileMenuPos({
+        right: Math.max(16, window.innerWidth - rect.right),
+        top: rect.bottom + 8,
+      });
+    }
+    setIsProfileMenuOpen(!isProfileMenuOpen);
+    setIsSymbolMenuOpen(false);
+    setIsTimeframeMenuOpen(false);
+    setIsChartTypeMenuOpen(false);
+    setIsIndicatorsMenuOpen(false);
   };
 
   const filteredSymbols = availableSymbols.filter(s => {
     const matchesSearch = s.display.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           s.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          s.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           (s.marketDisplay && s.marketDisplay.toLowerCase().includes(searchQuery.toLowerCase()));
-    const matchesMarket = marketFilter === 'all' || s.market === marketFilter;
-    return matchesSearch && matchesMarket;
+    if (!matchesSearch) return false;
+    if (marketFilter === 'all') return true;
+    if (marketFilter === 'boom_crash') {
+      return s.market === 'boom_crash' || 
+             s.id.toLowerCase().includes('boom') || 
+             s.id.toLowerCase().includes('crash') || 
+             s.display.toLowerCase().includes('boom') || 
+             s.display.toLowerCase().includes('crash');
+    }
+    return s.market === marketFilter;
   });
 
   const filteredBuiltins = BUILTIN_INDICATORS.filter(ind => 
     ind.name.toLowerCase().includes(indicatorSearchQuery.toLowerCase()) ||
-    ind.description.toLowerCase().includes(indicatorSearchQuery.toLowerCase())
+    ind.description.toLowerCase().includes(indicatorSearchQuery.toLowerCase()) ||
+    ind.category.toLowerCase().includes(indicatorSearchQuery.toLowerCase())
   );
 
   const filteredScripts = savedScripts.filter(s => 
@@ -260,13 +296,13 @@ const Header = () => {
         <div className="w-px h-5 bg-tv-border mx-0.5 shrink-0" />
 
         {/* Primary Navigation: Chart vs Technical Analysis */}
-        <nav className="flex items-center bg-tv-hover/50 p-0.5 rounded-lg border border-tv-border/50 text-xs font-semibold shrink-0">
+        <nav className="flex items-center bg-[#f0f3fa] dark:bg-[#1e222d] p-0.5 rounded-lg border border-[#e0e3eb] dark:border-[#2a2e39] text-xs font-semibold shrink-0">
           <button 
             onClick={() => setActivePage('chart')}
             className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded-md transition-all cursor-pointer shrink-0 ${
               activePage === 'chart' 
-                ? 'bg-tv-bg text-tv-accent shadow-xs font-bold' 
-                : 'text-tv-muted hover:text-tv-text'
+                ? 'bg-white dark:bg-[#2a2e39] text-[#2962ff] dark:text-[#2962ff] shadow-xs font-bold' 
+                : 'text-[#707584] dark:text-[#787b86] hover:text-[#131722] dark:hover:text-[#d1d4dc] hover:bg-black/5 dark:hover:bg-white/5'
             }`}
             title="Interactive Chart"
           >
@@ -277,8 +313,8 @@ const Header = () => {
             onClick={() => setActivePage('technical-analysis')}
             className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded-md transition-all cursor-pointer shrink-0 ${
               activePage === 'technical-analysis' 
-                ? 'bg-tv-bg text-tv-accent shadow-xs font-bold' 
-                : 'text-tv-muted hover:text-tv-text'
+                ? 'bg-white dark:bg-[#2a2e39] text-[#2962ff] dark:text-[#2962ff] shadow-xs font-bold' 
+                : 'text-[#707584] dark:text-[#787b86] hover:text-[#131722] dark:hover:text-[#d1d4dc] hover:bg-black/5 dark:hover:bg-white/5'
             }`}
             title="Technical Analysis"
           >
@@ -444,21 +480,9 @@ const Header = () => {
       </div>
 
       <div className="flex items-center gap-0.5 sm:gap-1 h-full shrink-0 ml-1">
-        {/* Only show chart layout, save & search on chart view */}
+        {/* Only show save & search on chart view */}
         {activePage === 'chart' && (
           <>
-            {/* Multi-Chart Layout */}
-            <button 
-              onClick={() => setLayoutSelectorOpen(true)}
-              className="hidden md:flex p-1.5 hover:bg-tv-hover rounded transition-colors shrink-0 cursor-pointer relative"
-              title="Select Chart Layout Grid"
-            >
-              <Square className="w-4 h-4 text-tv-muted" />
-              {multiLayout !== '1' && (
-                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-tv-accent rounded-full" />
-              )}
-            </button>
-            
             {/* Save Layout */}
             <button 
               onClick={() => setSaveLayoutModalOpen(true)}
@@ -482,14 +506,6 @@ const Header = () => {
             </button>
           </>
         )}
-        
-        <button 
-          onClick={toggleTheme}
-          className="p-1.5 hover:bg-tv-hover rounded transition-colors text-tv-accent cursor-pointer shrink-0"
-          title={theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
-        >
-          {theme === 'light' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
-        </button>
 
         {activePage === 'chart' && (
           <>
@@ -515,6 +531,36 @@ const Header = () => {
               <Camera className="w-4 h-4 text-tv-muted" />
             </button>
           </>
+        )}
+
+        {/* User Profile Circle Head */}
+        {user && (
+          <div className="flex items-center ml-1 pl-1 sm:pl-2 border-l border-tv-border">
+            <button
+              ref={profileBtnRef}
+              onClick={toggleProfileMenu}
+              className="relative p-0.5 rounded-full hover:ring-2 hover:ring-emerald-500/50 active:scale-95 transition-all cursor-pointer focus:outline-none shrink-0"
+              title={`${user.displayName || user.email || 'Trader'} - Account Profile`}
+              aria-label="User Profile"
+            >
+              {user.photoURL ? (
+                <img 
+                  src={user.photoURL} 
+                  alt={user.displayName || 'Profile'} 
+                  referrerPolicy="no-referrer"
+                  className="w-7 h-7 rounded-full object-cover border border-slate-700/80 shadow-xs"
+                />
+              ) : user.email ? (
+                <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-emerald-600 to-teal-400 text-slate-950 font-bold flex items-center justify-center text-xs shadow-xs">
+                  {user.email.charAt(0).toUpperCase()}
+                </div>
+              ) : (
+                <div className="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 text-emerald-400 flex items-center justify-center shadow-xs">
+                  <User className="w-3.5 h-3.5" />
+                </div>
+              )}
+            </button>
+          </div>
         )}
       </div>
 
@@ -577,16 +623,22 @@ const Header = () => {
                 All ({availableSymbols.length})
               </button>
               <button 
-                onClick={() => setMarketFilter('synthetic_index')}
-                className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'synthetic_index' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
+                onClick={() => setMarketFilter('boom_crash')}
+                className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'boom_crash' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
               >
-                Derived
+                Boom & Crash
               </button>
               <button 
                 onClick={() => setMarketFilter('forex')}
                 className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'forex' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
               >
                 Forex
+              </button>
+              <button 
+                onClick={() => setMarketFilter('synthetic_index')}
+                className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'synthetic_index' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
+              >
+                Derived
               </button>
               <button 
                 onClick={() => setMarketFilter('cryptocurrency')}
@@ -678,7 +730,7 @@ const Header = () => {
               ))}
               
               <div className="text-[10px] text-tv-muted px-2.5 py-1 mt-1 border-t border-tv-border/30 font-semibold">Hours</div>
-              {['1h', '2h', '4h', '8h'].map(tf => (
+              {['1h', '2h', '4h'].map(tf => (
                 <button 
                   key={tf}
                   onClick={() => {
@@ -833,9 +885,11 @@ const Header = () => {
                             if (applied) removeIndicator(applied.id);
                           } else {
                             addIndicator({
+                              id: ind.id,
                               name: ind.name,
                               code: ind.code,
-                              enabled: true
+                              enabled: true,
+                              params: ind.defaultParams ? { ...ind.defaultParams } : {}
                             });
                           }
                         }}
@@ -896,6 +950,123 @@ const Header = () => {
             </div>
           </div>
         </>
+      )}
+
+      {/* 5. User Profile Dropdown Modal (Portaled to document.body to prevent sidebar overlap & clipping) */}
+      {isProfileMenuOpen && user && typeof document !== 'undefined' && createPortal(
+        <>
+          <div 
+            className="fixed inset-0 z-[99990] bg-black/40 backdrop-blur-[1px] transition-opacity" 
+            onClick={closeAllMenus} 
+          />
+          <div 
+            style={{
+              top: `${profileMenuPos.top}px`,
+              right: `${profileMenuPos.right}px`
+            }}
+            className="fixed z-[99999] bg-[#131722] border border-slate-700/80 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.85)] rounded-2xl w-[340px] max-w-[calc(100vw-32px)] overflow-hidden animate-in fade-in zoom-in-95 duration-150 text-slate-100 font-sans"
+          >
+            {/* User Profile Header */}
+            <div className="p-4 pb-3 border-b border-slate-800/80 flex items-start gap-3 relative">
+              <div className="relative shrink-0">
+                {user.photoURL ? (
+                  <img 
+                    src={user.photoURL} 
+                    alt="Profile" 
+                    referrerPolicy="no-referrer"
+                    className="w-12 h-12 rounded-full object-cover border-2 border-emerald-500/70 shadow-md"
+                  />
+                ) : user.email ? (
+                  <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-emerald-600 to-teal-400 text-slate-950 font-bold flex items-center justify-center text-lg shadow-md">
+                    {user.email.charAt(0).toUpperCase()}
+                  </div>
+                ) : (
+                  <div className="w-12 h-12 rounded-full bg-slate-800 border border-slate-700 text-emerald-400 flex items-center justify-center shadow-md">
+                    <User className="w-6 h-6" />
+                  </div>
+                )}
+                <span className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-[#131722]" title="Online & Active" />
+              </div>
+              
+              <div className="flex flex-col min-w-0 flex-1 pr-6">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-bold text-sm text-slate-100 truncate">
+                    {user.displayName || (user.email ? user.email.split('@')[0] : 'Trader')}
+                  </span>
+                  <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" title="Verified Trader" />
+                </div>
+                <span className="text-xs text-slate-400 truncate mt-0.5 font-mono">
+                  {user.email || user.phoneNumber || 'Authenticated User'}
+                </span>
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 rounded-full font-mono flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    OTIVO Pro Account
+                  </span>
+                </div>
+              </div>
+
+              {/* Close Button */}
+              <button
+                type="button"
+                onClick={closeAllMenus}
+                className="absolute top-3.5 right-3.5 p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 transition-colors cursor-pointer"
+                title="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Quick Actions List */}
+            <div className="px-2 py-2 border-b border-slate-800/80 space-y-1">
+              <button
+                type="button"
+                onClick={() => {
+                  toggleTheme();
+                }}
+                className="w-full flex items-center justify-between px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800/70 rounded-xl transition-colors cursor-pointer"
+              >
+                <div className="flex items-center gap-2.5">
+                  {theme === 'light' ? <Moon className="w-4 h-4 text-slate-400" /> : <Sun className="w-4 h-4 text-amber-400" />}
+                  <span className="font-medium">Terminal Theme</span>
+                </div>
+                <span className="text-[10px] font-mono uppercase text-slate-300 px-2.5 py-0.5 rounded-full bg-slate-800 border border-slate-700/60 font-semibold">
+                  {theme}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setChartSettingsOpen(true);
+                  closeAllMenus();
+                }}
+                className="w-full flex items-center justify-between px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800/70 rounded-xl transition-colors cursor-pointer"
+              >
+                <div className="flex items-center gap-2.5">
+                  <Settings2 className="w-4 h-4 text-slate-400" />
+                  <span className="font-medium">Chart Appearance & Scales</span>
+                </div>
+              </button>
+            </div>
+
+            {/* Sign Out Action Button */}
+            <div className="p-3 bg-[#0a0d13]">
+              <button
+                type="button"
+                onClick={() => {
+                  signOutUser();
+                  closeAllMenus();
+                }}
+                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 text-xs font-bold text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-xl transition-all cursor-pointer shadow-xs active:scale-[0.99]"
+              >
+                <LogOut className="w-4 h-4" />
+                <span>Sign Out</span>
+              </button>
+            </div>
+          </div>
+        </>,
+        document.body
       )}
     </header>
   );
@@ -1154,14 +1325,6 @@ const DrawingToolbar = () => {
       </button>
       
       <div className="flex-1" />
-      
-      <div className="w-8 h-px bg-tv-border my-1.5" />
-      <button 
-        onClick={() => clearDrawings(activeSymbol)}
-        className="p-2.5 hover:bg-tv-hover rounded transition-colors group relative mb-1"
-      >
-        <Trash2 className="w-5 h-5 text-tv-muted group-hover:text-tv-text" title="Remove" />
-      </button>
 
       {/* Global overlay to close menus */}
       {activeMenu && (
@@ -1539,6 +1702,7 @@ const BottomBar = () => {
 };
 
 export default function App() {
+  const { user, loading: authLoading } = useAuth();
   const { 
     activeSymbol, activeTimeframe, addTick, setCandles, updateCandle, 
     theme, setAvailableSymbols, activePage, activePanel, setActivePanel 
@@ -1703,6 +1867,21 @@ export default function App() {
     };
   }, [activeSymbol, activeTimeframe, setCandles]);
 
+  if (authLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-[#07090e] text-slate-100">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+          <span className="text-xs text-slate-400 font-mono tracking-wider">INITIALIZING OTIVO TERMINAL...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <PhoneLoginScreen />;
+  }
+
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-tv-bg relative" id="tradingview-clone-root">
       <Header />
@@ -1711,7 +1890,6 @@ export default function App() {
       <AlertsModal />
       <TriggeredAlertToast />
       <BarReplayControl />
-      <LayoutSelectorModal />
       <SaveLayoutModal />
       <QuickSearchModal />
       <ChartSettingsModal />

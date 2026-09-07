@@ -45,6 +45,8 @@ export const IndicatorSettingsModal: React.FC<IndicatorSettingsModalProps> = ({ 
   const idLower = (indicator.id + ' ' + indicator.name).toLowerCase();
   const isFootprint = idLower.includes('footprint');
   const isDelta = idLower.includes('delta');
+  const isLiquiditySweep = idLower.includes('liquidity_sweep') || idLower.includes('liquidity sweep');
+  const isLiquiditySwings = idLower.includes('liquidity_swings') || idLower.includes('liquidity swings');
 
   const paramDefs: IndicatorParamDef[] = preset?.paramDefinitions || [
     { key: 'length', name: 'Length', type: 'int', default: 14, min: 1, max: 200, category: 'Calculations' }
@@ -113,7 +115,7 @@ export const IndicatorSettingsModal: React.FC<IndicatorSettingsModalProps> = ({ 
             Inputs & Parameters
           </button>
 
-          {(isFootprint || isDelta) && (
+          {(isFootprint || isDelta || isLiquiditySweep || isLiquiditySwings) && (
             <button
               onClick={() => setActiveTab('direction')}
               className={`flex items-center gap-1.5 px-3 py-2 border-b-2 transition-colors ${
@@ -123,7 +125,7 @@ export const IndicatorSettingsModal: React.FC<IndicatorSettingsModalProps> = ({ 
               }`}
             >
               <Compass size={14} />
-              Direction Intelligence (X-Ray)
+              {(isLiquiditySweep || isLiquiditySwings) ? 'Architecture & Strategy Guide' : 'Direction Intelligence (X-Ray)'}
               <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500/20 text-amber-400">
                 PRO
               </span>
@@ -622,6 +624,125 @@ export const IndicatorSettingsModal: React.FC<IndicatorSettingsModalProps> = ({ 
                           Price pushes to consecutive new highs, but positive individual bar delta gets smaller on each peak. Proves buying power is drying up and the upward movement is running out of fuel.
                         </p>
                       </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* LIQUIDITY SWEEP + CISD + FVG STRATEGY GUIDE */}
+              {isLiquiditySweep && (
+                <div className="space-y-4">
+                  <div className={`p-4 rounded-xl border ${isDark ? 'bg-[#2a2e39]/40 border-[#2a2e39]' : 'bg-slate-50 border-slate-200'}`}>
+                    <div className="flex items-start gap-3">
+                      <div className="p-2 rounded-lg bg-blue-500/20 text-blue-400 shrink-0 mt-0.5">
+                        <Zap size={16} />
+                      </div>
+                      <div className="text-xs leading-relaxed">
+                        <span className="font-semibold text-sm block mb-1">Liquidity Sweep + CISD + FVG Strategy</span>
+                        A core Smart Money / ICT algorithmic trading setup combining liquidity purge confirmation, Change in State of Delivery (CISD) transition shifts, and opposing Fair Value Gap (FVG) entry zones.
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Step 1: Liquidity Sweep */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                      <Layers size={14} />
+                      Step 1: Liquidity Sweep (Purge & Rejection Wick)
+                    </div>
+                    <div className={`p-3 rounded-lg border ${isDark ? 'bg-slate-800/40 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-200">Wick Piercing & Close Back</span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/20 text-blue-400">Swept Level</span>
+                      </div>
+                      <p className={`text-xs mt-1 leading-relaxed ${isDark ? 'text-[#a1a7b4]' : 'text-slate-600'}`}>
+                        Price probes beyond a previous swing high or low with a fast wick to grab liquidity, but closes back inside the level, signaling that institutions absorbed retail resting stops.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Step 2: CISD */}
+                  <div className="space-y-2 pt-1">
+                    <div className="flex items-center gap-2 text-xs font-bold text-blue-400 uppercase tracking-wider">
+                      <TrendingUp size={14} />
+                      Step 2: CISD (Change in State of Delivery)
+                    </div>
+                    <div className={`p-3 rounded-lg border ${isDark ? 'bg-blue-500/5 border-blue-500/20' : 'bg-blue-50 border-blue-200'}`}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-blue-400">Opposing Candle Sequence Break</span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/20 text-blue-300">State Transition</span>
+                      </div>
+                      <p className={`text-xs mt-1 leading-relaxed ${isDark ? 'text-[#a1a7b4]' : 'text-slate-600'}`}>
+                        The opening level of the last opposing candle sequence (or structural swing point prior to the sweep) is broken and closed beyond with displacement, confirming delivery orderflow has changed.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Step 3: FVG */}
+                  <div className="space-y-2 pt-1">
+                    <div className="flex items-center gap-2 text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                      <Zap size={14} />
+                      Step 3: FVG (Fair Value Gap Imbalance Entry)
+                    </div>
+                    <div className={`p-3 rounded-lg border ${isDark ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-emerald-50 border-emerald-200'}`}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-emerald-400">Displacement Imbalance Zone</span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">Optimal Entry</span>
+                      </div>
+                      <p className={`text-xs mt-1 leading-relaxed ${isDark ? 'text-[#a1a7b4]' : 'text-slate-600'}`}>
+                        A 3-bar Fair Value Gap formed during the displacement run serves as the high-probability return-to-origin entry zone.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* LIQUIDITY SWINGS STRATEGY GUIDE */}
+              {isLiquiditySwings && (
+                <div className="space-y-4">
+                  <div className={`p-4 rounded-xl border ${isDark ? 'bg-[#2a2e39]/40 border-[#2a2e39]' : 'bg-slate-50 border-slate-200'}`}>
+                    <div className="flex items-start gap-3">
+                      <div className="p-2 rounded-lg bg-red-500/20 text-red-400 shrink-0 mt-0.5">
+                        <Activity size={16} />
+                      </div>
+                      <div className="text-xs leading-relaxed">
+                        <span className="font-semibold text-sm block mb-1">Liquidity Swings & Resting Volume Pools</span>
+                        Identifies institutional Sell-Side and Buy-Side swing extremes, measuring resting volume footprints, highlighting shaded price blocks, and projecting horizontal mitigation target levels across the chart.
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Sell Liquidity Swings */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-xs font-bold text-red-400 uppercase tracking-wider">
+                      <TrendingUp size={14} className="rotate-180" />
+                      Swing Highs (Sell Liquidity Pools)
+                    </div>
+                    <div className={`p-3 rounded-lg border ${isDark ? 'bg-red-500/5 border-red-500/20' : 'bg-red-50 border-red-200'}`}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-red-400">Resting Buy-Stop Volume Pool (Sell Tag)</span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-300">e.g. 23.823K Sell</span>
+                      </div>
+                      <p className={`text-xs mt-1 leading-relaxed ${isDark ? 'text-[#a1a7b4]' : 'text-slate-600'}`}>
+                        Calculates institutional volume concentrated at swing highs. Shaded red blocks highlight the order footprint, and extending lines mark the resting liquidity targets until swept.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Buy Liquidity Swings */}
+                  <div className="space-y-2 pt-1">
+                    <div className="flex items-center gap-2 text-xs font-bold text-cyan-400 uppercase tracking-wider">
+                      <TrendingUp size={14} />
+                      Swing Lows (Buy Liquidity Pools)
+                    </div>
+                    <div className={`p-3 rounded-lg border ${isDark ? 'bg-cyan-500/5 border-cyan-500/20' : 'bg-cyan-50 border-cyan-200'}`}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-cyan-400">Resting Sell-Stop Volume Pool (Buy Tag)</span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300">e.g. 99.906K Buy</span>
+                      </div>
+                      <p className={`text-xs mt-1 leading-relaxed ${isDark ? 'text-[#a1a7b4]' : 'text-slate-600'}`}>
+                        Aggregates resting liquidity below swing lows. Shaded cyan blocks reveal demand footprints, and extending horizontal levels provide targets for market makers to absorb retail sell stops.
+                      </p>
                     </div>
                   </div>
                 </div>

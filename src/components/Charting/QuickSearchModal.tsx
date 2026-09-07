@@ -87,7 +87,13 @@ export const QuickSearchModal: React.FC = () => {
       description: ind.category,
       icon: <LineChart className="w-4 h-4 text-tv-accent" />,
       action: () => {
-        addIndicator({ name: ind.name, code: ind.code });
+        addIndicator({ 
+          id: ind.id, 
+          name: ind.name, 
+          code: ind.code,
+          enabled: true,
+          params: ind.defaultParams ? { ...ind.defaultParams } : {}
+        });
         setQuickSearchOpen(false);
       }
     });
@@ -119,7 +125,7 @@ export const QuickSearchModal: React.FC = () => {
   });
 
   // 4. Timeframes
-  (['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '8h', '1d', '1w'] as Timeframe[]).forEach(tf => {
+  (['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d', '1w'] as Timeframe[]).forEach(tf => {
     allItems.push({
       id: `tf-${tf}`,
       title: `Switch Timeframe to ${tf}`,

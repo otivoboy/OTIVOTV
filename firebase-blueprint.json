@@ -1,0 +1,134 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with authentication info, email or phone, and session state.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Firebase Auth UID"
+        },
+        "email": {
+          "type": "string",
+          "description": "Verified Google email address"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User display name"
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "User avatar photo URL"
+        },
+        "phoneNumber": {
+          "type": "string",
+          "description": "Verified phone number formatted in E.164"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp when the user registered"
+        },
+        "lastLoginAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp of most recent login"
+        }
+      },
+      "required": ["id", "createdAt", "lastLoginAt"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "Cross-browser persistent settings including theme, indicators, drawings, layout, and alerts.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the owning user"
+        },
+        "theme": {
+          "type": "string",
+          "enum": ["light", "dark"],
+          "description": "User active UI theme"
+        },
+        "activeSymbol": {
+          "type": "string",
+          "description": "Last active market symbol"
+        },
+        "activeTimeframe": {
+          "type": "string",
+          "description": "Last active chart timeframe"
+        },
+        "chartType": {
+          "type": "string",
+          "description": "Active chart visualization type"
+        },
+        "activeIndicators": {
+          "type": "array",
+          "description": "Active indicators with customized parameters"
+        },
+        "hiddenIndicators": {
+          "type": "array",
+          "description": "IDs of indicators temporarily toggled off"
+        },
+        "savedScripts": {
+          "type": "array",
+          "description": "Custom indicator and Pine scripts created by user"
+        },
+        "chartSettings": {
+          "type": "object",
+          "description": "Custom candlestick colors, grid lines, volume visibility, and scale precision"
+        },
+        "drawings": {
+          "type": "array",
+          "description": "Technical analysis drawings and annotations placed on charts"
+        },
+        "alerts": {
+          "type": "array",
+          "description": "User price alerts with trigger conditions"
+        },
+        "savedLayouts": {
+          "type": "array",
+          "description": "Saved multi-chart and workspace layout templates"
+        },
+        "currentLayoutName": {
+          "type": "string",
+          "description": "Name of the currently loaded chart layout"
+        },
+        "multiLayout": {
+          "type": "string",
+          "description": "Active grid split arrangement"
+        },
+        "taTimeframe": {
+          "type": "string",
+          "description": "Technical analysis dashboard timeframe"
+        },
+        "pivotMode": {
+          "type": "string",
+          "description": "Pivot calculation mode"
+        },
+        "activePanel": {
+          "type": "string",
+          "description": "Last active sidebar panel if any"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp when the settings were last synced"
+        }
+      },
+      "required": ["userId", "theme", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Stores user profile data accessible only by the authenticated user."
+    },
+    "/users/{userId}/settings/{settingId}": {
+      "schema": "UserSettings",
+      "description": "Stores cross-browser synchronized chart preferences, indicators, drawings, and alerts."
+    }
+  }
+}
