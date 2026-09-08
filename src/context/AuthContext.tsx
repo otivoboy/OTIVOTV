@@ -41,17 +41,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [user, setUser] = useState<AuthUser | null>(() => {
     try {
-      const saved = localStorage.getItem('otivo_demo_user');
+      const saved = localStorage.getItem('otivo_cached_user') || localStorage.getItem('otivo_demo_user');
       if (saved) return JSON.parse(saved);
     } catch {}
     return null;
   });
-  const [loading, setLoading] = useState(true);
+  // If user is already cached, no need to block the terminal!
+  const [loading, setLoading] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('otivo_cached_user') || localStorage.getItem('otivo_demo_user');
+      if (saved) return false;
+    } catch {}
+    return true;
+  });
   const currentUserRef = useRef<AuthUser | null>(user);
 
   useEffect(() => {
     currentUserRef.current = user;
+    if (user) {
+      try {
+        localStorage.setItem('otivo_cached_user', JSON.stringify(user));
+      } catch {}
+    } else {
+      try {
+        localStorage.removeItem('otivo_cached_user');
+      } catch {}
+    }
   }, [user]);
+
+  // Fast safety timeout: never let loading hang longer than 350ms
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Set up store automatic settings synchronization to cloud
   useEffect(() => {
@@ -199,56 +223,55 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       setFirebaseUser(fbUser);
       if (fbUser) {
-        try {
-          localStorage.removeItem('otivo_demo_user');
-          const userRef = doc(db, 'users', fbUser.uid);
-          const snap = await getDoc(userRef);
-          if (snap.exists()) {
-            const data = snap.data();
-            const loggedInUser: AuthUser = {
-              uid: fbUser.uid,
-              phoneNumber: fbUser.phoneNumber || data.phoneNumber || null,
-              email: fbUser.email || data.email || null,
-              displayName: fbUser.displayName || data.displayName || null,
-              photoURL: fbUser.photoURL || data.photoURL || null,
-              createdAt: data.createdAt,
-              lastLoginAt: data.lastLoginAt
-            };
-            setUser(loggedInUser);
-          } else {
-            const loggedInUser: AuthUser = {
-              uid: fbUser.uid,
-              phoneNumber: fbUser.phoneNumber || null,
-              email: fbUser.email || null,
-              displayName: fbUser.displayName || null,
-              photoURL: fbUser.photoURL || null
-            };
-            setUser(loggedInUser);
+        localStorage.removeItem('otivo_demo_user');
+        // Immediate unblock with standard Firebase User profile fields
+        const initialLoggedInUser: AuthUser = {
+          uid: fbUser.uid,
+          phoneNumber: fbUser.phoneNumber || null,
+          email: fbUser.email || null,
+          displayName: fbUser.displayName || (fbUser.email ? fbUser.email.split('@')[0] : 'Trader'),
+          photoURL: fbUser.photoURL || null
+        };
+        setUser((prev) => (prev && prev.uid === fbUser.uid ? prev : initialLoggedInUser));
+        setLoading(false);
+
+        // Fetch Firestore profile data and settings asynchronously in background
+        (async () => {
+          try {
+            const userRef = doc(db, 'users', fbUser.uid);
+            const snap = await getDoc(userRef);
+            if (snap.exists()) {
+              const data = snap.data();
+              setUser((prev) => ({
+                ...initialLoggedInUser,
+                ...prev,
+                uid: fbUser.uid,
+                phoneNumber: fbUser.phoneNumber || data.phoneNumber || prev?.phoneNumber || null,
+                email: fbUser.email || data.email || prev?.email || null,
+                displayName: fbUser.displayName || data.displayName || prev?.displayName || null,
+                photoURL: fbUser.photoURL || data.photoURL || prev?.photoURL || null,
+                createdAt: data.createdAt,
+                lastLoginAt: data.lastLoginAt
+              }));
+            }
+          } catch (err) {
+            console.warn('Background profile sync info:', err);
           }
-          // Restore user settings across browsers on login
-          await loadUserSettingsFromCloud(fbUser.uid);
-        } catch {
-          setUser({
-            uid: fbUser.uid,
-            phoneNumber: fbUser.phoneNumber || null,
-            email: fbUser.email || null,
-            displayName: fbUser.displayName || null,
-            photoURL: fbUser.photoURL || null
-          });
-          await loadUserSettingsFromCloud(fbUser.uid);
-        }
+          loadUserSettingsFromCloud(fbUser.uid).catch(() => {});
+        })();
       } else {
         const savedDemo = localStorage.getItem('otivo_demo_user');
         if (!savedDemo) {
           setUser(null);
+          localStorage.removeItem('otivo_cached_user');
         } else {
           try {
             const parsed = JSON.parse(savedDemo);
-            loadUserSettingsFromCloud(parsed.uid);
+            loadUserSettingsFromCloud(parsed.uid).catch(() => {});
           } catch {}
         }
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => unsubscribe();
@@ -257,12 +280,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signOutUser = async () => {
     try {
       localStorage.removeItem('otivo_demo_user');
+      localStorage.removeItem('otivo_cached_user');
       await fbSignOut(auth);
       setUser(null);
       setFirebaseUser(null);
     } catch (err) {
       console.error('Error signing out:', err);
       localStorage.removeItem('otivo_demo_user');
+      localStorage.removeItem('otivo_cached_user');
       setUser(null);
       setFirebaseUser(null);
     }

@@ -12,7 +12,9 @@ import {
   Zap, 
   Layers, 
   Activity,
-  Code
+  Code,
+  ChevronDown,
+  Clock
 } from 'lucide-react';
 import { BUILTIN_INDICATORS, IndicatorPreset, IndicatorParamDef } from '../../lib/indicatorsList';
 import { IndicatorItem, useMarketStore } from '../../store/useMarketStore';
@@ -39,10 +41,12 @@ export const IndicatorSettingsModal: React.FC<IndicatorSettingsModalProps> = ({ 
     };
   });
 
-  const [activeTab, setActiveTab] = useState<'inputs' | 'style' | 'direction' | 'code'>('inputs');
+  const [activeTab, setActiveTab] = useState<'inputs' | 'style' | 'direction' | 'code' | 'visibility'>('inputs');
   const [customCode, setCustomCode] = useState(indicator.code || preset?.code || '');
+  const [showDefaultsMenu, setShowDefaultsMenu] = useState(false);
 
   const idLower = (indicator.id + ' ' + indicator.name).toLowerCase();
+  const isSessions = idLower.includes('session');
   const isFootprint = idLower.includes('footprint');
   const isDelta = idLower.includes('delta');
   const isLiquiditySweep = idLower.includes('liquidity_sweep') || idLower.includes('liquidity sweep');
@@ -57,6 +61,66 @@ export const IndicatorSettingsModal: React.FC<IndicatorSettingsModalProps> = ({ 
   };
 
   const handleReset = () => {
+    if (isSessions) {
+      setParams({
+        high_low_view: false,
+        resolution: '1 day',
+        london_active: true,
+        london_start: '03:00',
+        london_end: '12:00',
+        london_color: '#26a69a',
+        london_bg_color: 'rgba(38, 166, 154, 0.18)',
+        london_plot: true,
+        london_bg: true,
+        ny_active: true,
+        ny_start: '08:00',
+        ny_end: '17:00',
+        ny_color: '#f59e0b',
+        ny_bg_color: 'rgba(245, 158, 11, 0.18)',
+        ny_plot: true,
+        ny_bg: true,
+        tokyo_active: true,
+        tokyo_start: '20:00',
+        tokyo_end: '04:00',
+        tokyo_color: '#00b4d8',
+        tokyo_bg_color: 'rgba(0, 180, 216, 0.16)',
+        tokyo_plot: true,
+        tokyo_bg: true,
+        sydney_active: true,
+        sydney_start: '17:00',
+        sydney_end: '02:00',
+        sydney_color: '#ef5350',
+        sydney_bg_color: 'rgba(239, 83, 80, 0.16)',
+        sydney_plot: true,
+        sydney_bg: true,
+        plots_bg: true,
+        precision: 'Default',
+        labels_on_price_scale: true,
+        values_in_status_line: true,
+        inputs_in_status_line: true,
+        visibility_ticks: true,
+        visibility_seconds: true,
+        visibility_seconds_min: 1,
+        visibility_seconds_max: 59,
+        visibility_minutes: true,
+        visibility_minutes_min: 1,
+        visibility_minutes_max: 59,
+        visibility_hours: true,
+        visibility_hours_min: 1,
+        visibility_hours_max: 24,
+        visibility_days: true,
+        visibility_days_min: 1,
+        visibility_days_max: 366,
+        visibility_weeks: true,
+        visibility_weeks_min: 1,
+        visibility_weeks_max: 52,
+        visibility_months: true,
+        visibility_months_min: 1,
+        visibility_months_max: 12,
+        visibility_ranges: true,
+      });
+      return;
+    }
     if (preset?.defaultParams) {
       setParams({ ...preset.defaultParams });
       setCustomCode(preset.code);
@@ -82,12 +146,14 @@ export const IndicatorSettingsModal: React.FC<IndicatorSettingsModalProps> = ({ 
         <div className={`flex items-center justify-between px-5 py-4 border-b ${isDark ? 'border-[#2a2e39]' : 'border-slate-200'}`}>
           <div className="flex items-center gap-3">
             <div className={`p-2 rounded-lg ${isDark ? 'bg-[#2a2e39] text-blue-400' : 'bg-blue-50 text-blue-600'}`}>
-              <Sliders size={18} />
+              {isSessions ? <Clock size={18} /> : <Sliders size={18} />}
             </div>
             <div>
-              <h2 className="text-base font-semibold tracking-tight">{indicator.name}</h2>
+              <h2 className="text-base font-semibold tracking-tight">{isSessions ? 'Sessions' : indicator.name}</h2>
               <p className={`text-xs ${isDark ? 'text-[#787b86]' : 'text-slate-500'}`}>
-                Configure calculation parameters, visual styling, and signal direction rules.
+                {isSessions 
+                  ? 'Configure market hours, high-low ranges, styles, and timeframe visibility.'
+                  : 'Configure calculation parameters, visual styling, and signal direction rules.'}
               </p>
             </div>
           </div>
@@ -103,64 +169,185 @@ export const IndicatorSettingsModal: React.FC<IndicatorSettingsModalProps> = ({ 
 
         {/* Navigation Tabs */}
         <div className={`flex items-center gap-1 px-5 pt-3 border-b text-xs font-medium ${isDark ? 'border-[#2a2e39]' : 'border-slate-200'}`}>
-          <button
-            onClick={() => setActiveTab('inputs')}
-            className={`flex items-center gap-1.5 px-3 py-2 border-b-2 transition-colors ${
-              activeTab === 'inputs'
-                ? isDark ? 'border-blue-500 text-blue-400 font-semibold' : 'border-blue-600 text-blue-600 font-semibold'
-                : isDark ? 'border-transparent text-[#787b86] hover:text-[#d1d4dc]' : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <Sliders size={14} />
-            Inputs & Parameters
-          </button>
+          {isSessions ? (
+            <>
+              <button
+                onClick={() => setActiveTab('inputs')}
+                className={`flex items-center gap-1.5 px-3.5 py-2 border-b-2 transition-colors ${
+                  activeTab === 'inputs'
+                    ? isDark ? 'border-blue-500 text-blue-400 font-semibold' : 'border-blue-600 text-blue-600 font-semibold'
+                    : isDark ? 'border-transparent text-[#787b86] hover:text-[#d1d4dc]' : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Inputs
+              </button>
+              <button
+                onClick={() => setActiveTab('style')}
+                className={`flex items-center gap-1.5 px-3.5 py-2 border-b-2 transition-colors ${
+                  activeTab === 'style'
+                    ? isDark ? 'border-blue-500 text-blue-400 font-semibold' : 'border-blue-600 text-blue-600 font-semibold'
+                    : isDark ? 'border-transparent text-[#787b86] hover:text-[#d1d4dc]' : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Style
+              </button>
+              <button
+                onClick={() => setActiveTab('visibility')}
+                className={`flex items-center gap-1.5 px-3.5 py-2 border-b-2 transition-colors ${
+                  activeTab === 'visibility'
+                    ? isDark ? 'border-blue-500 text-blue-400 font-semibold' : 'border-blue-600 text-blue-600 font-semibold'
+                    : isDark ? 'border-transparent text-[#787b86] hover:text-[#d1d4dc]' : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Visibility
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => setActiveTab('inputs')}
+                className={`flex items-center gap-1.5 px-3 py-2 border-b-2 transition-colors ${
+                  activeTab === 'inputs'
+                    ? isDark ? 'border-blue-500 text-blue-400 font-semibold' : 'border-blue-600 text-blue-600 font-semibold'
+                    : isDark ? 'border-transparent text-[#787b86] hover:text-[#d1d4dc]' : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Sliders size={14} />
+                Inputs & Parameters
+              </button>
 
-          {(isFootprint || isDelta || isLiquiditySweep || isLiquiditySwings) && (
-            <button
-              onClick={() => setActiveTab('direction')}
-              className={`flex items-center gap-1.5 px-3 py-2 border-b-2 transition-colors ${
-                activeTab === 'direction'
-                  ? isDark ? 'border-amber-500 text-amber-400 font-semibold' : 'border-amber-600 text-amber-600 font-semibold'
-                  : isDark ? 'border-transparent text-[#787b86] hover:text-[#d1d4dc]' : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              <Compass size={14} />
-              {(isLiquiditySweep || isLiquiditySwings) ? 'Architecture & Strategy Guide' : 'Direction Intelligence (X-Ray)'}
-              <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500/20 text-amber-400">
-                PRO
-              </span>
-            </button>
+              {(isFootprint || isDelta || isLiquiditySweep || isLiquiditySwings) && (
+                <button
+                  onClick={() => setActiveTab('direction')}
+                  className={`flex items-center gap-1.5 px-3 py-2 border-b-2 transition-colors ${
+                    activeTab === 'direction'
+                      ? isDark ? 'border-amber-500 text-amber-400 font-semibold' : 'border-amber-600 text-amber-600 font-semibold'
+                      : isDark ? 'border-transparent text-[#787b86] hover:text-[#d1d4dc]' : 'border-transparent text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <Compass size={14} />
+                  {(isLiquiditySweep || isLiquiditySwings) ? 'Architecture & Strategy Guide' : 'Direction Intelligence (X-Ray)'}
+                  <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500/20 text-amber-400">
+                    PRO
+                  </span>
+                </button>
+              )}
+
+              <button
+                onClick={() => setActiveTab('style')}
+                className={`flex items-center gap-1.5 px-3 py-2 border-b-2 transition-colors ${
+                  activeTab === 'style'
+                    ? isDark ? 'border-blue-500 text-blue-400 font-semibold' : 'border-blue-600 text-blue-600 font-semibold'
+                    : isDark ? 'border-transparent text-[#787b86] hover:text-[#d1d4dc]' : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Eye size={14} />
+                Style & Display
+              </button>
+
+              <button
+                onClick={() => setActiveTab('code')}
+                className={`flex items-center gap-1.5 px-3 py-2 border-b-2 transition-colors ${
+                  activeTab === 'code'
+                    ? isDark ? 'border-blue-500 text-blue-400 font-semibold' : 'border-blue-600 text-blue-600 font-semibold'
+                    : isDark ? 'border-transparent text-[#787b86] hover:text-[#d1d4dc]' : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Code size={14} />
+                Pine Code
+              </button>
+            </>
           )}
-
-          <button
-            onClick={() => setActiveTab('style')}
-            className={`flex items-center gap-1.5 px-3 py-2 border-b-2 transition-colors ${
-              activeTab === 'style'
-                ? isDark ? 'border-blue-500 text-blue-400 font-semibold' : 'border-blue-600 text-blue-600 font-semibold'
-                : isDark ? 'border-transparent text-[#787b86] hover:text-[#d1d4dc]' : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <Eye size={14} />
-            Style & Display
-          </button>
-
-          <button
-            onClick={() => setActiveTab('code')}
-            className={`flex items-center gap-1.5 px-3 py-2 border-b-2 transition-colors ${
-              activeTab === 'code'
-                ? isDark ? 'border-blue-500 text-blue-400 font-semibold' : 'border-blue-600 text-blue-600 font-semibold'
-                : isDark ? 'border-transparent text-[#787b86] hover:text-[#d1d4dc]' : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <Code size={14} />
-            Pine Code
-          </button>
         </div>
 
         {/* Content Body */}
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
           {/* TAB 1: INPUTS */}
           {activeTab === 'inputs' && (
+            isSessions ? (
+              <div className="space-y-4 py-1">
+                {/* Activate High-Low View */}
+                <label className="flex items-center gap-3 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={!!params.high_low_view}
+                    onChange={e => handleParamChange('high_low_view', e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-600 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                  <span className="text-sm font-medium">Activate High-Low View</span>
+                </label>
+
+                {/* Resolution */}
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-sm font-medium">Resolution</span>
+                  <select
+                    value={params.resolution || '1 day'}
+                    onChange={e => handleParamChange('resolution', e.target.value)}
+                    className={`px-3 py-1.5 rounded text-xs font-medium border ${
+                      isDark ? 'bg-[#131722] border-[#2a2e39] text-[#d1d4dc]' : 'bg-white border-slate-300 text-slate-700'
+                    } focus:outline-none focus:border-blue-500`}
+                  >
+                    <option value="1 day">1 day</option>
+                    <option value="Same as chart">Same as chart</option>
+                    <option value="1 hour">1 hour</option>
+                    <option value="4 hours">4 hours</option>
+                  </select>
+                </div>
+
+                {/* Session Time Range Rows */}
+                <div className="space-y-3 pt-2">
+                  {[
+                    { label: 'London Session', startKey: 'london_start', endKey: 'london_end', defaultStart: '03:00', defaultEnd: '12:00' },
+                    { label: 'New York Session', startKey: 'ny_start', endKey: 'ny_end', defaultStart: '08:00', defaultEnd: '17:00' },
+                    { label: 'Tokyo Session', startKey: 'tokyo_start', endKey: 'tokyo_end', defaultStart: '20:00', defaultEnd: '04:00' },
+                    { label: 'Sydney Session', startKey: 'sydney_start', endKey: 'sydney_end', defaultStart: '17:00', defaultEnd: '02:00' }
+                  ].map(s => (
+                    <div key={s.label} className="flex items-center justify-between">
+                      <span className="text-sm font-medium">{s.label}</span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={params[s.startKey] || s.defaultStart}
+                          onChange={e => handleParamChange(s.startKey, e.target.value)}
+                          className={`w-20 px-2 py-1 text-center font-mono text-xs rounded border ${
+                            isDark ? 'bg-[#131722] border-[#2a2e39] text-[#d1d4dc]' : 'bg-white border-slate-300 text-slate-700'
+                          } focus:outline-none focus:border-blue-500`}
+                        />
+                        <span className="text-xs text-[#787b86]">-</span>
+                        <input
+                          type="text"
+                          value={params[s.endKey] || s.defaultEnd}
+                          onChange={e => handleParamChange(s.endKey, e.target.value)}
+                          className={`w-20 px-2 py-1 text-center font-mono text-xs rounded border ${
+                            isDark ? 'bg-[#131722] border-[#2a2e39] text-[#d1d4dc]' : 'bg-white border-slate-300 text-slate-700'
+                          } focus:outline-none focus:border-blue-500`}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Active Session Checkboxes */}
+                <div className="space-y-2.5 pt-3 border-t border-[#2a2e39]/50">
+                  {[
+                    { label: 'London Session', key: 'london_active', defaultVal: true },
+                    { label: 'New York Session', key: 'ny_active', defaultVal: true },
+                    { label: 'Tokyo Session', key: 'tokyo_active', defaultVal: true },
+                    { label: 'Sydney Session', key: 'sydney_active', defaultVal: true }
+                  ].map(s => (
+                    <label key={s.key} className="flex items-center gap-3 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={params[s.key] ?? s.defaultVal}
+                        onChange={e => handleParamChange(s.key, e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-600 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                      />
+                      <span className="text-sm">{s.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ) : (
             <div className="space-y-4">
               {/* Footprint Quick Direction Switch */}
               {isFootprint && (
@@ -414,6 +601,7 @@ export const IndicatorSettingsModal: React.FC<IndicatorSettingsModalProps> = ({ 
                 })}
               </div>
             </div>
+            )
           )}
 
           {/* TAB 2: DIRECTION INTELLIGENCE (FOOTPRINT & DELTA RULES) */}
@@ -752,6 +940,153 @@ export const IndicatorSettingsModal: React.FC<IndicatorSettingsModalProps> = ({ 
 
           {/* TAB 3: STYLE & DISPLAY */}
           {activeTab === 'style' && (
+            isSessions ? (
+              <div className="space-y-4 py-1 text-sm">
+                {[
+                  {
+                    name: 'London',
+                    plotKey: 'london_plot',
+                    colorKey: 'london_color',
+                    defaultColor: '#26a69a',
+                    bgKey: 'london_bg',
+                    bgColorKey: 'london_bg_color',
+                    defaultBgColor: 'rgba(38, 166, 154, 0.18)'
+                  },
+                  {
+                    name: 'New York',
+                    plotKey: 'ny_plot',
+                    colorKey: 'ny_color',
+                    defaultColor: '#f59e0b',
+                    bgKey: 'ny_bg',
+                    bgColorKey: 'ny_bg_color',
+                    defaultBgColor: 'rgba(245, 158, 11, 0.18)'
+                  },
+                  {
+                    name: 'Tokyo',
+                    plotKey: 'tokyo_plot',
+                    colorKey: 'tokyo_color',
+                    defaultColor: '#00b4d8',
+                    bgKey: 'tokyo_bg',
+                    bgColorKey: 'tokyo_bg_color',
+                    defaultBgColor: 'rgba(0, 180, 216, 0.16)'
+                  },
+                  {
+                    name: 'Sydney',
+                    plotKey: 'sydney_plot',
+                    colorKey: 'sydney_color',
+                    defaultColor: '#ef5350',
+                    bgKey: 'sydney_bg',
+                    bgColorKey: 'sydney_bg_color',
+                    defaultBgColor: 'rgba(239, 83, 80, 0.16)'
+                  }
+                ].map(s => (
+                  <div key={s.name} className="space-y-2 pb-2.5 border-b border-[#2a2e39]/50">
+                    <div className="flex items-center justify-between">
+                      <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={params[s.plotKey] ?? true}
+                          onChange={e => handleParamChange(s.plotKey, e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-600 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span>{s.name} Plot</span>
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={params[s.colorKey] || s.defaultColor}
+                          onChange={e => handleParamChange(s.colorKey, e.target.value)}
+                          className="w-7 h-7 rounded cursor-pointer border-0 bg-transparent"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={params[s.bgKey] ?? true}
+                          onChange={e => handleParamChange(s.bgKey, e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-600 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span>Background Color</span>
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={params[s.colorKey] || s.defaultColor}
+                          onChange={e => {
+                            const hex = e.target.value;
+                            handleParamChange(s.colorKey, hex);
+                            handleParamChange(s.bgColorKey, hex + '2e');
+                          }}
+                          className="w-7 h-7 rounded cursor-pointer border-0 bg-transparent"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+
+                {/* Plots Background */}
+                <div className="flex items-center justify-between pt-1">
+                  <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={params.plots_bg ?? true}
+                      onChange={e => handleParamChange('plots_bg', e.target.checked)}
+                      className="w-4 h-4 rounded border-slate-600 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>Plots Background</span>
+                  </label>
+                  <input
+                    type="color"
+                    value={params.plots_bg_color || '#2962ff'}
+                    onChange={e => handleParamChange('plots_bg_color', e.target.value)}
+                    className="w-7 h-7 rounded cursor-pointer border-0 bg-transparent"
+                  />
+                </div>
+
+                <div className="pt-3 border-t border-[#2a2e39]/60">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-[#787b86] mb-2.5">OUTPUT VALUES</div>
+                  
+                  <div className="flex items-center justify-between py-1.5">
+                    <span>Precision</span>
+                    <select
+                      value={params.precision || 'Default'}
+                      onChange={e => handleParamChange('precision', e.target.value)}
+                      className={`px-3 py-1 rounded text-xs border ${
+                        isDark ? 'bg-[#131722] border-[#2a2e39] text-[#d1d4dc]' : 'bg-white border-slate-300 text-slate-700'
+                      }`}
+                    >
+                      <option value="Default">Default</option>
+                      <option value="0">0</option>
+                      <option value="1">1</option>
+                      <option value="2">2</option>
+                      <option value="3">3</option>
+                      <option value="4">4</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-2.5 pt-1.5">
+                    {[
+                      { label: 'Labels on price scale', key: 'labels_on_price_scale' },
+                      { label: 'Values in status line', key: 'values_in_status_line' },
+                      { label: 'Inputs in status line', key: 'inputs_in_status_line' }
+                    ].map(opt => (
+                      <label key={opt.key} className="flex items-center gap-2.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={params[opt.key] ?? true}
+                          onChange={e => handleParamChange(opt.key, e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-600 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span>{opt.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className={`p-3 rounded-lg border ${isDark ? 'bg-[#2a2e39]/30 border-[#2a2e39]' : 'bg-slate-50 border-slate-200'}`}>
@@ -780,10 +1115,78 @@ export const IndicatorSettingsModal: React.FC<IndicatorSettingsModalProps> = ({ 
                 </p>
               </div>
             </div>
+            )
           )}
 
-          {/* TAB 4: CODE EDITOR */}
-          {activeTab === 'code' && (
+          {/* TAB 4: VISIBILITY */}
+          {activeTab === 'visibility' && (
+            <div className="space-y-3 py-1 text-sm">
+              {/* Ticks */}
+              <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={params.visibility_ticks ?? true}
+                  onChange={e => handleParamChange('visibility_ticks', e.target.checked)}
+                  className="w-4 h-4 rounded border-slate-600 text-blue-600 focus:ring-blue-500"
+                />
+                <span>Ticks</span>
+              </label>
+
+              {/* Seconds, Minutes, Hours, Days, Weeks, Months with ranges */}
+              {[
+                { label: 'Seconds', checkKey: 'visibility_seconds', minKey: 'visibility_seconds_min', maxKey: 'visibility_seconds_max', defMin: 1, defMax: 59 },
+                { label: 'Minutes', checkKey: 'visibility_minutes', minKey: 'visibility_minutes_min', maxKey: 'visibility_minutes_max', defMin: 1, defMax: 59 },
+                { label: 'Hours', checkKey: 'visibility_hours', minKey: 'visibility_hours_min', maxKey: 'visibility_hours_max', defMin: 1, defMax: 24 },
+                { label: 'Days', checkKey: 'visibility_days', minKey: 'visibility_days_min', maxKey: 'visibility_days_max', defMin: 1, defMax: 366 },
+                { label: 'Weeks', checkKey: 'visibility_weeks', minKey: 'visibility_weeks_min', maxKey: 'visibility_weeks_max', defMin: 1, defMax: 52 },
+                { label: 'Months', checkKey: 'visibility_months', minKey: 'visibility_months_min', maxKey: 'visibility_months_max', defMin: 1, defMax: 12 }
+              ].map(item => (
+                <div key={item.label} className="flex items-center justify-between">
+                  <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={params[item.checkKey] ?? true}
+                      onChange={e => handleParamChange(item.checkKey, e.target.checked)}
+                      className="w-4 h-4 rounded border-slate-600 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>{item.label}</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={params[item.minKey] ?? item.defMin}
+                      onChange={e => handleParamChange(item.minKey, parseInt(e.target.value) || 0)}
+                      className={`w-14 px-2 py-1 text-center font-mono text-xs rounded border ${
+                        isDark ? 'bg-[#131722] border-[#2a2e39] text-[#d1d4dc]' : 'bg-white border-slate-300 text-slate-700'
+                      }`}
+                    />
+                    <input
+                      type="number"
+                      value={params[item.maxKey] ?? item.defMax}
+                      onChange={e => handleParamChange(item.maxKey, parseInt(e.target.value) || 0)}
+                      className={`w-14 px-2 py-1 text-center font-mono text-xs rounded border ${
+                        isDark ? 'bg-[#131722] border-[#2a2e39] text-[#d1d4dc]' : 'bg-white border-slate-300 text-slate-700'
+                      }`}
+                    />
+                  </div>
+                </div>
+              ))}
+
+              {/* Ranges */}
+              <label className="flex items-center gap-2.5 cursor-pointer select-none pt-1">
+                <input
+                  type="checkbox"
+                  checked={params.visibility_ranges ?? true}
+                  onChange={e => handleParamChange('visibility_ranges', e.target.checked)}
+                  className="w-4 h-4 rounded border-slate-600 text-blue-600 focus:ring-blue-500"
+                />
+                <span>Ranges</span>
+              </label>
+            </div>
+          )}
+
+          {/* TAB 5: CODE EDITOR */}
+          {activeTab === 'code' && !isSessions && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold">Pine Script Definition</span>
@@ -804,32 +1207,52 @@ export const IndicatorSettingsModal: React.FC<IndicatorSettingsModalProps> = ({ 
         </div>
 
         {/* Modal Footer */}
-        <div className={`flex items-center justify-between px-5 py-3.5 border-t ${isDark ? 'border-[#2a2e39] bg-[#1e222d]' : 'border-slate-200 bg-slate-50'} rounded-b-xl`}>
-          <button
-            onClick={handleReset}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              isDark ? 'hover:bg-[#2a2e39] text-[#787b86] hover:text-white' : 'hover:bg-slate-200 text-slate-600'
-            }`}
-          >
-            <RotateCcw size={14} />
-            Reset to Defaults
-          </button>
+        <div className={`flex items-center justify-between px-5 py-3.5 border-t ${isDark ? 'border-[#2a2e39] bg-[#1e222d]' : 'border-slate-200 bg-slate-50'} rounded-b-xl relative`}>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowDefaultsMenu(!showDefaultsMenu)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border transition-colors ${
+                isDark ? 'bg-[#2a2e39]/60 hover:bg-[#2a2e39] border-[#363a45] text-[#d1d4dc]' : 'bg-white hover:bg-slate-100 border-slate-300 text-slate-700'
+              }`}
+            >
+              <span>Defaults</span>
+              <ChevronDown size={13} />
+            </button>
+            {showDefaultsMenu && (
+              <div 
+                className={`absolute bottom-full mb-1 left-0 z-50 py-1 min-w-[140px] rounded shadow-xl border ${
+                  isDark ? 'bg-[#1e222d] border-[#2a2e39] text-[#d1d4dc]' : 'bg-white border-slate-200 text-slate-800'
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => { handleReset(); setShowDefaultsMenu(false); }}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-blue-600 hover:text-white transition-colors flex items-center gap-2"
+                >
+                  <RotateCcw size={12} />
+                  Reset settings
+                </button>
+              </div>
+            )}
+          </div>
 
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={onClose}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                isDark ? 'hover:bg-[#2a2e39] text-[#d1d4dc]' : 'hover:bg-slate-200 text-slate-700'
+              className={`px-4 py-1.5 rounded text-xs font-medium border transition-colors ${
+                isDark ? 'border-[#363a45] hover:bg-[#2a2e39] text-[#d1d4dc]' : 'border-slate-300 hover:bg-slate-100 text-slate-700'
               }`}
             >
               Cancel
             </button>
             <button
+              type="button"
               onClick={handleSave}
-              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white transition-colors shadow-sm"
+              className="px-5 py-1.5 rounded text-xs font-semibold bg-[#2962ff] hover:bg-[#1e53e5] text-white transition-colors shadow-sm"
             >
-              <Check size={14} />
-              Apply Settings
+              Ok
             </button>
           </div>
         </div>

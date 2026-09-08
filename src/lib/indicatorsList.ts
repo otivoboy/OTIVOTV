@@ -254,51 +254,81 @@ plot(lower, "Lower Band", color=#00b4d8)`
   },
   {
     id: 'sessions_indicator',
-    name: 'Sessions (Asian, London, New York)',
+    name: 'Sessions',
     category: 'Sessions',
-    description: 'Highlights global trading sessions: Asian (Tokyo 00:00-09:00 UTC), London (08:00-16:30 UTC), and New York (13:00-21:00 UTC) with dynamic high/low range boxes.',
+    description: 'Highlights global trading sessions: London (03:00-12:00), New York (08:00-17:00), Tokyo (20:00-04:00), and Sydney (17:00-02:00) with full-height vertical bands or High-Low range boxes.',
     overlay: true,
     defaultParams: {
-      show_asian: true,
-      asian_start: 0,
-      asian_end: 9,
-      asian_color: '#9c27b0',
-      show_london: true,
-      london_start: 8,
-      london_end: 16.5,
-      london_color: '#00b4d8',
-      show_ny: true,
-      ny_start: 13,
-      ny_end: 21,
-      ny_color: '#ff9800',
-      show_range_boxes: true,
-      show_open_lines: true
+      high_low_view: false,
+      resolution: '1 day',
+      london_active: true,
+      london_start: '03:00',
+      london_end: '12:00',
+      london_color: '#26a69a',
+      london_bg_color: 'rgba(38, 166, 154, 0.18)',
+      london_plot: true,
+      london_bg: true,
+      ny_active: true,
+      ny_start: '08:00',
+      ny_end: '17:00',
+      ny_color: '#f59e0b',
+      ny_bg_color: 'rgba(245, 158, 11, 0.18)',
+      ny_plot: true,
+      ny_bg: true,
+      tokyo_active: true,
+      tokyo_start: '20:00',
+      tokyo_end: '04:00',
+      tokyo_color: '#00b4d8',
+      tokyo_bg_color: 'rgba(0, 180, 216, 0.16)',
+      tokyo_plot: true,
+      tokyo_bg: true,
+      sydney_active: true,
+      sydney_start: '17:00',
+      sydney_end: '02:00',
+      sydney_color: '#ef5350',
+      sydney_bg_color: 'rgba(239, 83, 80, 0.16)',
+      sydney_plot: true,
+      sydney_bg: true,
+      plots_bg: true,
+      precision: 'Default',
+      labels_on_price_scale: true,
+      values_in_status_line: true,
+      inputs_in_status_line: true,
+      show_range_boxes: false,
+      show_open_lines: false
     },
     paramDefinitions: [
-      { key: 'show_asian', name: 'Asian Session (Tokyo)', type: 'bool', default: true, category: 'General' },
-      { key: 'asian_start', name: 'Asian Start Hour (UTC)', type: 'float', default: 0, min: 0, max: 24, step: 0.5, category: 'Calculations' },
-      { key: 'asian_end', name: 'Asian End Hour (UTC)', type: 'float', default: 9, min: 0, max: 24, step: 0.5, category: 'Calculations' },
-      { key: 'asian_color', name: 'Asian Box Color', type: 'color', default: '#9c27b0', category: 'Visuals' },
-
-      { key: 'show_london', name: 'London Session', type: 'bool', default: true, category: 'General' },
-      { key: 'london_start', name: 'London Start Hour (UTC)', type: 'float', default: 8, min: 0, max: 24, step: 0.5, category: 'Calculations' },
-      { key: 'london_end', name: 'London End Hour (UTC)', type: 'float', default: 16.5, min: 0, max: 24, step: 0.5, category: 'Calculations' },
-      { key: 'london_color', name: 'London Box Color', type: 'color', default: '#00b4d8', category: 'Visuals' },
-
-      { key: 'show_ny', name: 'New York Session', type: 'bool', default: true, category: 'General' },
-      { key: 'ny_start', name: 'New York Start Hour (UTC)', type: 'float', default: 13, min: 0, max: 24, step: 0.5, category: 'Calculations' },
-      { key: 'ny_end', name: 'New York End Hour (UTC)', type: 'float', default: 21, min: 0, max: 24, step: 0.5, category: 'Calculations' },
-      { key: 'ny_color', name: 'New York Box Color', type: 'color', default: '#ff9800', category: 'Visuals' },
-
-      { key: 'show_range_boxes', name: 'Draw High/Low Range Shaded Boxes', type: 'bool', default: true, category: 'Visuals' },
-      { key: 'show_open_lines', name: 'Draw Session Opening Price Line', type: 'bool', default: true, category: 'Visuals' }
+      { key: 'high_low_view', name: 'Activate High-Low View', type: 'bool', default: false, category: 'General' },
+      { 
+        key: 'resolution', 
+        name: 'Resolution', 
+        type: 'select', 
+        default: '1 day',
+        options: [
+          { label: '1 day', value: '1 day' },
+          { label: 'Same as chart', value: 'Same as chart' },
+          { label: '1 hour', value: '1 hour' },
+          { label: '4 hours', value: '4 hours' }
+        ],
+        category: 'General'
+      },
+      { key: 'london_active', name: 'London Session', type: 'bool', default: true, category: 'General' },
+      { key: 'london_color', name: 'London Color', type: 'color', default: '#26a69a', category: 'Visuals' },
+      { key: 'ny_active', name: 'New York Session', type: 'bool', default: true, category: 'General' },
+      { key: 'ny_color', name: 'New York Color', type: 'color', default: '#f59e0b', category: 'Visuals' },
+      { key: 'tokyo_active', name: 'Tokyo Session', type: 'bool', default: true, category: 'General' },
+      { key: 'tokyo_color', name: 'Tokyo Color', type: 'color', default: '#00b4d8', category: 'Visuals' },
+      { key: 'sydney_active', name: 'Sydney Session', type: 'bool', default: true, category: 'General' },
+      { key: 'sydney_color', name: 'Sydney Color', type: 'color', default: '#ef5350', category: 'Visuals' }
     ],
     code: `//@version=5
-indicator("Market Sessions (Asian, London, NY)", overlay=true)
-show_asian = input.bool(true, "Show Asian Session")
-show_london = input.bool(true, "Show London Session")
-show_ny = input.bool(true, "Show New York Session")
-show_range_boxes = input.bool(true, "Show Range Boxes")`
+indicator("Sessions", overlay=true)
+high_low = input.bool(false, "Activate High-Low View")
+res = input.string("1 day", "Resolution")
+s_lon = input.session("0300-1200", "London Session")
+s_ny = input.session("0800-1700", "New York Session")
+s_tok = input.session("2000-0400", "Tokyo Session")
+s_syd = input.session("1700-0200", "Sydney Session")`
   },
   {
     id: 'demand_supply_zones',

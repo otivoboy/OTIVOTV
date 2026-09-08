@@ -24,6 +24,7 @@ import { getSymbolPriceFormat, formatSymbolPrice } from '../../lib/priceFormatte
 import { OtivoPreloader } from '../Common/OtivoPreloader';
 import { OscillatorPanel } from './OscillatorPanel';
 import { IndicatorSettingsModal } from './IndicatorSettingsModal';
+import { DrawingSettingsModal } from './DrawingSettingsModal';
 import { generateSeedCandles, derivClient } from '../../lib/derivClient';
 
 import { 
@@ -39,7 +40,14 @@ import {
   ChevronDown,
   Search,
   X,
-  Layers
+  Layers,
+  GripVertical,
+  LayoutGrid,
+  Pencil,
+  MoreHorizontal,
+  Clock,
+  PaintBucket,
+  ArrowUpDown
 } from 'lucide-react';
 
 const TIMEFRAME_SECONDS: Record<string, number> = {
@@ -81,6 +89,26 @@ const getDistToSegment = (x: number, y: number, x1: number, y1: number, x2: numb
   const dx = x - xx;
   const dy = y - yy;
   return Math.sqrt(dx * dx + dy * dy);
+};
+
+export const formatMovingPrice = (price: number, symbol: string): string => {
+  if (price === undefined || isNaN(price)) return '---';
+  const format = getSymbolPriceFormat(symbol, price);
+  let precision = format.precision;
+  
+  // If price has more decimal places (e.g. 3 decimals on tick for XAUUSD as in screenshot), preserve it
+  const priceStr = price.toString();
+  if (priceStr.includes('.')) {
+    const decimals = priceStr.split('.')[1].length;
+    if (decimals > precision && decimals <= 5) {
+      precision = decimals;
+    }
+  }
+
+  return price.toLocaleString('en-US', {
+    minimumFractionDigits: precision,
+    maximumFractionDigits: precision,
+  });
 };
 
 export const createSeriesForType = (
@@ -280,17 +308,19 @@ const getXFromTime = (timeScale: any, t: any, candles?: Candle[]): number | null
 
   if (firstCandleTime === null || lastCandleTime === null) return null;
 
+  let dt = 60;
+  if (n >= 2) {
+    const prevTime = parseTimeSec(candles[n - 2].time) || (lastCandleTime - 60);
+    dt = Math.max(1, lastCandleTime - prevTime);
+  }
+
   // 2. Find fractional logical index relative to the candles series
   let logicalIdx = 0;
   if (n === 1) {
     logicalIdx = 0;
   } else if (targetSec <= firstCandleTime) {
-    const nextTime = parseTimeSec(candles[1].time) || (firstCandleTime + 60);
-    const dt = Math.max(1, nextTime - firstCandleTime);
     logicalIdx = (targetSec - firstCandleTime) / dt;
   } else if (targetSec >= lastCandleTime) {
-    const prevTime = parseTimeSec(candles[n - 2].time) || (lastCandleTime - 60);
-    const dt = Math.max(1, lastCandleTime - prevTime);
     logicalIdx = (n - 1) + (targetSec - lastCandleTime) / dt;
   } else {
     // Binary search to find candle interval
@@ -307,7 +337,7 @@ const getXFromTime = (timeScale: any, t: any, candles?: Candle[]): number | null
     }
     const idx = Math.max(0, Math.min(n - 2, high));
     const t0 = parseTimeSec(candles[idx].time) || 0;
-    const t1 = parseTimeSec(candles[idx + 1].time) || (t0 + 60);
+    const t1 = parseTimeSec(candles[idx + 1].time) || (t0 + dt);
     const frac = (targetSec - t0) / Math.max(1, t1 - t0);
     logicalIdx = idx + frac;
   }
@@ -315,6 +345,10 @@ const getXFromTime = (timeScale: any, t: any, candles?: Candle[]): number | null
   // 3. Convert logical index to screen pixel coordinate via timeScale
   try {
     if (typeof timeScale.logicalToCoordinate === 'function') {
+      const coord = timeScale.logicalToCoordinate(logicalIdx as any);
+      if (coord !== null && !isNaN(coord)) {
+        return coord;
+      }
       const floorIdx = Math.floor(logicalIdx);
       const coordFloor = timeScale.logicalToCoordinate(floorIdx as any);
       const coordCeil = timeScale.logicalToCoordinate((floorIdx + 1) as any);
@@ -339,7 +373,22 @@ const getXFromTime = (timeScale: any, t: any, candles?: Candle[]): number | null
     // fallback
   }
 
-  // 4. Fallback: Find any two candles that are currently visible to establish pixel scale
+  // 4. Fallback using visible logical range
+  try {
+    const visRange = timeScale.getVisibleLogicalRange?.();
+    if (visRange && visRange.to > visRange.from) {
+      const xFrom = timeScale.logicalToCoordinate(visRange.from as any);
+      const xTo = timeScale.logicalToCoordinate(visRange.to as any);
+      if (xFrom !== null && xTo !== null && xTo > xFrom) {
+        const barSpacing = (xTo - xFrom) / (visRange.to - visRange.from);
+        return xFrom + (logicalIdx - visRange.from) * barSpacing;
+      }
+    }
+  } catch {
+    // fallback
+  }
+
+  // 5. Fallback: Find any two candles that are currently visible
   try {
     let visibleA: { time: number; x: number } | null = null;
     let visibleB: { time: number; x: number } | null = null;
@@ -367,6 +416,78 @@ const getXFromTime = (timeScale: any, t: any, candles?: Candle[]): number | null
   }
 
   return null;
+};
+
+const getTimeFromX = (timeScale: any, x: number, candles?: Candle[]): number | null => {
+  if (!timeScale) return null;
+
+  // 1. Direct coordinate lookup
+  try {
+    const directTime = timeScale.coordinateToTime(x);
+    if (directTime !== null && directTime !== undefined) {
+      const parsed = parseTimeSec(directTime);
+      if (parsed !== null && !isNaN(parsed)) return parsed;
+    }
+  } catch {
+    // proceed to logical calculation
+  }
+
+  if (!candles || candles.length === 0) return null;
+  const n = candles.length;
+  const firstCandleTime = parseTimeSec(candles[0].time);
+  const lastCandleTime = parseTimeSec(candles[n - 1].time);
+  if (firstCandleTime === null || lastCandleTime === null) return null;
+
+  let dt = 60;
+  if (n >= 2) {
+    const prevTime = parseTimeSec(candles[n - 2].time) || (lastCandleTime - 60);
+    dt = Math.max(1, lastCandleTime - prevTime);
+  }
+
+  // 2. Try coordinateToLogical
+  try {
+    if (typeof timeScale.coordinateToLogical === 'function') {
+      const logical = timeScale.coordinateToLogical(x);
+      if (logical !== null && logical !== undefined && !isNaN(logical)) {
+        if (logical >= 0 && logical < n) {
+          const idx = Math.max(0, Math.min(n - 1, Math.round(logical)));
+          const cTime = parseTimeSec(candles[idx].time);
+          if (cTime !== null) return cTime;
+        } else if (logical >= n) {
+          return Math.round(lastCandleTime + (logical - (n - 1)) * dt);
+        } else {
+          return Math.round(firstCandleTime + logical * dt);
+        }
+      }
+    }
+  } catch {
+    // fallback
+  }
+
+  // 3. Fallback using visible logical range
+  try {
+    const visRange = timeScale.getVisibleLogicalRange?.();
+    if (visRange && visRange.to > visRange.from) {
+      const xFrom = timeScale.logicalToCoordinate(visRange.from as any);
+      const xTo = timeScale.logicalToCoordinate(visRange.to as any);
+      if (xFrom !== null && xTo !== null && xTo > xFrom) {
+        const pxPerBar = (xTo - xFrom) / (visRange.to - visRange.from);
+        const logical = visRange.from + (x - xFrom) / pxPerBar;
+        if (logical >= n) {
+          return Math.round(lastCandleTime + (logical - (n - 1)) * dt);
+        } else if (logical < 0) {
+          return Math.round(firstCandleTime + logical * dt);
+        } else {
+          const idx = Math.max(0, Math.min(n - 1, Math.round(logical)));
+          return parseTimeSec(candles[idx].time) || lastCandleTime;
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return lastCandleTime;
 };
 
 export interface TradingChartProps {
@@ -411,6 +532,13 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   const currentSeriesTypeRef = useRef<ChartType>('candlestick');
   const priceLineRef = useRef<any>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const movingPriceBadgeRef = useRef<{
+    price: number;
+    timeStr: string;
+    isUp: boolean;
+    showCountdown: boolean;
+    color: string;
+  } | null>(null);
   const { 
     candles, candlesVersion, activeSymbol, activeTimeframe, availableSymbols, lastTick, theme, marketTime,
     activeTool, drawings, addDrawing, setActiveTool, removeDrawing,
@@ -473,26 +601,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     }
   }, [effectiveSymbol, effectiveTimeframe, isMultiPane]);
 
-  // Micro-tick simulator for subpanes as a fallback if WebSocket is quiet
-  useEffect(() => {
-    if (!isMultiPane) return;
-    const interval = setInterval(() => {
-      setLocalCandles(prev => {
-        if (prev.length === 0) return prev;
-        const last = prev[prev.length - 1];
-        const change = (Math.random() - 0.49) * 0.0006 * last.close;
-        const newClose = parseFloat((last.close + change).toFixed(5));
-        const updatedLast: Candle = {
-          ...last,
-          high: Math.max(last.high, newClose),
-          low: Math.min(last.low, newClose),
-          close: newClose
-        };
-        return [...prev.slice(0, -1), updatedLast];
-      });
-    }, 1400);
-    return () => clearInterval(interval);
-  }, [isMultiPane, effectiveSymbol]);
+
 
   const displayCandles = isMultiPane ? localCandles : candles;
 
@@ -560,9 +669,12 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     return true;
   });
   
-  // Floating toolbar state
+  // Floating toolbar state & settings modal
   const [toolbarPos, setToolbarPos] = useState<{ x: number, y: number } | null>(null);
-  const [showColorPicker, setShowColorPicker] = useState(false);
+  const [showColorPicker, setShowColorPicker] = useState<string | boolean>(false);
+  const [isDrawingSettingsOpen, setIsDrawingSettingsOpen] = useState(false);
+  const [isDraggingToolbar, setIsDraggingToolbar] = useState(false);
+  const toolbarDragStartRef = useRef<{ mouseX: number; mouseY: number; initialX: number; initialY: number } | null>(null);
   const [indicatorParamLength, setIndicatorParamLength] = useState<number>(20);
 
   const TRADING_COLORS = [
@@ -595,6 +707,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   const prevCandlesCountRef = useRef<number>(0);
 
   const [isHoveringDrawing, setIsHoveringDrawing] = useState(false);
+  const [isHoveringScale, setIsHoveringScale] = useState(false);
   const [hoveredHandle, setHoveredHandle] = useState<string | null>(null);
   const [selectedIndicatorForSettings, setSelectedIndicatorForSettings] = useState<string | null>(null);
   const [chartApi, setChartApi] = useState<IChartApi | null>(null);
@@ -1183,6 +1296,24 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               x2 = lastCandleX + 4;
             }
 
+            // Support for full-height vertical session bands (clean background fill without dotted lines)
+            if (box.isVerticalBand) {
+              if (x1 !== null && x2 !== null) {
+                if ((x1 < -100 && x2 < -100) || (x1 > width + 100 && x2 > width + 100)) return;
+
+                const bx = Math.min(x1, x2);
+                const bw = Math.max(Math.abs(x2 - x1), 4);
+                const by = 0;
+                const bh = height;
+
+                if (box.color && box.color !== 'transparent') {
+                  ctx.fillStyle = box.color;
+                  ctx.fillRect(bx, by, bw, bh);
+                }
+              }
+              return;
+            }
+
             if (x1 !== null && x2 !== null && y1 !== null && y2 !== null) {
               // If both points are off the same side of the screen, skip rendering
               if ((x1 < -50 && x2 < -50) || (x1 > width + 50 && x2 > width + 50)) return;
@@ -1682,25 +1813,96 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         const x2 = getXFromTime(timeScale, drawing.data.end.time, currentCandles);
         const y2 = series.priceToCoordinate(drawing.data.end.price);
         if (x1 !== null && y1 !== null && x2 !== null && y2 !== null) {
-          const levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
-          const diff = drawing.data.end.price - drawing.data.start.price;
-          const left = Math.min(x1, x2);
-          const right = Math.max(x1, x2);
+          const DEFAULT_FIB_LEVELS = [
+            { level: 0, color: '#787b86', active: true },
+            { level: 0.236, color: '#f23645', active: true },
+            { level: 0.382, color: '#ff9800', active: true },
+            { level: 0.5, color: '#4caf50', active: true },
+            { level: 0.618, color: '#089981', active: true },
+            { level: 0.786, color: '#2962ff', active: true },
+            { level: 1, color: '#9c27b0', active: true },
+            { level: 1.618, color: '#2962ff', active: true },
+            { level: 2.618, color: '#f23645', active: false },
+            { level: 3.618, color: '#9c27b0', active: false },
+            { level: 4.236, color: '#e91e63', active: false },
+            { level: -0.236, color: '#f23645', active: false },
+            { level: -0.618, color: '#089981', active: false },
+            { level: -2.618, color: '#2962ff', active: false },
+            { level: 1.272, color: '#787b86', active: false },
+            { level: 1.414, color: '#f23645', active: false },
+          ];
+          
+          let rawLevels = drawing.data?.fibLevels || DEFAULT_FIB_LEVELS;
+          let activeLevels = rawLevels.filter((l: any) => l.active).sort((a: any, b: any) => a.level - b.level);
+          
+          const isReverse = drawing.data?.fibReverse || false;
+          const extendLeft = drawing.data?.fibExtendLeft || false;
+          const extendRight = drawing.data?.fibExtendRight || false;
+          const useOneColor = drawing.data?.fibUseOneColor || false;
+          const oneColor = drawing.data?.fibOneColor || '#2962ff';
+          const fillBackground = drawing.data?.fibBackground !== false;
 
-          levels.forEach(lvl => {
-            const price = drawing.data.start.price + diff * lvl;
+          let diff = drawing.data.end.price - drawing.data.start.price;
+          
+          let lineLeft = extendLeft ? 0 : Math.min(x1, x2);
+          let lineRight = extendRight ? width : Math.max(x1, x2);
+          
+          const isRainbow = drawing.color === 'rainbow';
+          const FIB_COLORS = ['#787b86', '#f23645', '#ff9800', '#4caf50', '#089981', '#2962ff', '#9c27b0'];
+          
+          ctx.lineWidth = drawing.lineWidth || 1;
+
+          // Draw Trend Line
+          ctx.save();
+          ctx.beginPath();
+          ctx.setLineDash([5, 5]);
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.strokeStyle = drawingColor;
+          ctx.stroke();
+          ctx.restore();
+
+          // Draw Backgrounds
+          if (fillBackground && activeLevels.length > 1) {
+            for (let i = 0; i < activeLevels.length - 1; i++) {
+              const lvl1 = activeLevels[i];
+              const lvl2 = activeLevels[i+1];
+              
+              const calcLevel1 = isReverse ? (1 - lvl1.level) : lvl1.level;
+              const calcLevel2 = isReverse ? (1 - lvl2.level) : lvl2.level;
+              
+              const price1 = drawing.data.start.price + diff * calcLevel1;
+              const price2 = drawing.data.start.price + diff * calcLevel2;
+              
+              const py1 = series.priceToCoordinate(price1);
+              const py2 = series.priceToCoordinate(price2);
+              
+              if (py1 !== null && py2 !== null) {
+                const color = useOneColor ? oneColor : (isRainbow ? FIB_COLORS[i % FIB_COLORS.length] : lvl1.color);
+                ctx.fillStyle = color + '1a'; // 10% opacity
+                ctx.fillRect(lineLeft, Math.min(py1, py2), lineRight - lineLeft, Math.abs(py1 - py2));
+              }
+            }
+          }
+
+          // Draw Lines and Text
+          activeLevels.forEach((lvl: any, idx: number) => {
+            const calcLevel = isReverse ? (1 - lvl.level) : lvl.level;
+            const price = drawing.data.start.price + diff * calcLevel;
             const y = series.priceToCoordinate(price);
             if (y !== null) {
+              const color = useOneColor ? oneColor : (isRainbow ? FIB_COLORS[idx % FIB_COLORS.length] : lvl.color);
+              ctx.strokeStyle = color;
+              
               ctx.beginPath();
-              ctx.moveTo(left, y);
-              ctx.lineTo(right, y);
-              ctx.globalAlpha = 0.5;
+              ctx.moveTo(lineLeft, y);
+              ctx.lineTo(lineRight, y);
               ctx.stroke();
-              ctx.globalAlpha = 1.0;
+              
               ctx.save();
               ctx.font = '10px Inter';
-              ctx.fillStyle = isDark ? '#ffffff' : '#000000';
-              ctx.fillText(`${(lvl * 100).toFixed(1)}% (${price.toFixed(5)})`, left + 5, y - 2);
+              ctx.fillStyle = color;
+              ctx.fillText(`${lvl.level} (${price.toFixed(5)})`, lineLeft + 5, y - 2);
               ctx.restore();
             }
           });
@@ -1713,7 +1915,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               ctx.fillStyle = '#ffffff';
               ctx.fill();
               ctx.lineWidth = 2;
-              ctx.strokeStyle = drawingColor;
+              ctx.strokeStyle = isRainbow ? '#2962ff' : drawingColor;
               ctx.stroke();
             });
             ctx.restore();
@@ -1942,31 +2144,51 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             });
 
             if (activeCandles.length > 0) {
-              isTriggered = true;
-              const lastActive = activeCandles[activeCandles.length - 1];
-              currentPrice = lastActive.close;
-              const lastCandleTime = typeof lastActive.time === 'number' ? lastActive.time : Math.floor(new Date(lastActive.time).getTime() / 1000);
-              const cx = getXFromTime(timeScale, lastCandleTime, currentCandles);
-              if (cx !== null) {
-                progressX = Math.min(boxRight, Math.max(boxLeft, cx));
-              }
-
-              for (const cand of activeCandles) {
-                if (isLong) {
-                  if (cand.high >= tpPrice) { hitTarget = true; isClosed = true; break; }
-                  if (cand.low <= slPrice) { hitStop = true; isClosed = true; break; }
-                } else {
-                  if (cand.low <= tpPrice) { hitTarget = true; isClosed = true; break; }
-                  if (cand.high >= slPrice) { hitStop = true; isClosed = true; break; }
+              let triggeredIdx = -1;
+              for (let i = 0; i < activeCandles.length; i++) {
+                const cand = activeCandles[i];
+                if (cand.low <= entryPrice && cand.high >= entryPrice) {
+                  triggeredIdx = i;
+                  break;
+                }
+                if (i > 0) {
+                  const prev = activeCandles[i - 1];
+                  if ((prev.close < entryPrice && cand.open > entryPrice) || 
+                      (prev.close > entryPrice && cand.open < entryPrice)) {
+                    triggeredIdx = i;
+                    break;
+                  }
                 }
               }
 
-              if (hitTarget) {
-                progressY = ytp;
-              } else if (hitStop) {
-                progressY = ysl;
-              } else {
-                progressY = series.priceToCoordinate(currentPrice) ?? yentry;
+              if (triggeredIdx !== -1) {
+                isTriggered = true;
+                const relevantCandles = activeCandles.slice(triggeredIdx);
+                const lastActive = relevantCandles[relevantCandles.length - 1];
+                currentPrice = lastActive.close;
+                const lastCandleTime = typeof lastActive.time === 'number' ? lastActive.time : Math.floor(new Date(lastActive.time).getTime() / 1000);
+                const cx = getXFromTime(timeScale, lastCandleTime, currentCandles);
+                if (cx !== null) {
+                  progressX = Math.min(boxRight, Math.max(boxLeft, cx));
+                }
+
+                for (const cand of relevantCandles) {
+                  if (isLong) {
+                    if (cand.high >= tpPrice) { hitTarget = true; isClosed = true; break; }
+                    if (cand.low <= slPrice) { hitStop = true; isClosed = true; break; }
+                  } else {
+                    if (cand.low <= tpPrice) { hitTarget = true; isClosed = true; break; }
+                    if (cand.high >= slPrice) { hitStop = true; isClosed = true; break; }
+                  }
+                }
+
+                if (hitTarget) {
+                  progressY = ytp;
+                } else if (hitStop) {
+                  progressY = ysl;
+                } else {
+                  progressY = series.priceToCoordinate(currentPrice) ?? yentry;
+                }
               }
             }
           }
@@ -1984,9 +2206,20 @@ export const TradingChart: React.FC<TradingChartProps> = ({
 
           const inProfit = pnlValue >= 0;
 
-          // 1. Draw Target Box (Blue for Long, Green for Short)
+          const customTargetColor = drawing.color || drawing.data?.targetColor;
+          const customStopColor = drawing.data?.stopColor;
+          const showBadges = drawing.data?.showBadges !== false;
+          const showStatusCard = drawing.data?.showStatusCard !== false;
+
+          // 1. Draw Target Box
           ctx.save();
-          if (isLong) {
+          if (customTargetColor) {
+            ctx.fillStyle = `${customTargetColor}55`;
+            ctx.fillRect(boxLeft, Math.min(targetYTop, targetYBottom), boxWidth, targetHeight);
+            ctx.strokeStyle = customTargetColor;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(boxLeft, Math.min(targetYTop, targetYBottom), boxWidth, targetHeight);
+          } else if (isLong) {
             // Long Target Zone: Blue fill
             ctx.fillStyle = 'rgba(30, 80, 225, 0.45)';
             ctx.fillRect(boxLeft, Math.min(targetYTop, targetYBottom), boxWidth, targetHeight);
@@ -2003,13 +2236,21 @@ export const TradingChart: React.FC<TradingChartProps> = ({
           }
           ctx.restore();
 
-          // 2. Draw Stop Loss Box (Dark Burgundy/Red for both Long and Short)
+          // 2. Draw Stop Loss Box
           ctx.save();
-          ctx.fillStyle = 'rgba(127, 29, 29, 0.40)';
-          ctx.fillRect(boxLeft, Math.min(stopYTop, stopYBottom), boxWidth, stopHeight);
-          ctx.strokeStyle = 'rgba(220, 38, 38, 0.8)';
-          ctx.lineWidth = 1;
-          ctx.strokeRect(boxLeft, Math.min(stopYTop, stopYBottom), boxWidth, stopHeight);
+          if (customStopColor) {
+            ctx.fillStyle = `${customStopColor}55`;
+            ctx.fillRect(boxLeft, Math.min(stopYTop, stopYBottom), boxWidth, stopHeight);
+            ctx.strokeStyle = customStopColor;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(boxLeft, Math.min(stopYTop, stopYBottom), boxWidth, stopHeight);
+          } else {
+            ctx.fillStyle = 'rgba(127, 29, 29, 0.40)';
+            ctx.fillRect(boxLeft, Math.min(stopYTop, stopYBottom), boxWidth, stopHeight);
+            ctx.strokeStyle = 'rgba(220, 38, 38, 0.8)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(boxLeft, Math.min(stopYTop, stopYBottom), boxWidth, stopHeight);
+          }
           ctx.restore();
 
           // 3. Draw Active Candlestick Progress Area & Trajectory Line
@@ -2151,14 +2392,22 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               ctx.restore();
             };
 
-            // Top-left
-            drawBlueSquareHandle(boxLeft, isLong ? ytp : ysl);
-            // Mid-left (entry)
+            const topY = isLong ? ytp : ysl;
+            const bottomY = isLong ? ysl : ytp;
+
+            // Top handles (Target for Long, Stop for Short)
+            drawBlueSquareHandle(boxLeft, topY);
+            drawBlueSquareHandle(midX, topY);
+            drawBlueSquareHandle(boxRight, topY);
+
+            // Mid handles (Start entry time & End width expansion)
             drawBlueSquareHandle(boxLeft, yentry);
-            // Mid-right (width)
             drawBlueSquareHandle(boxRight, yentry);
-            // Bottom-left
-            drawBlueSquareHandle(boxLeft, isLong ? ysl : ytp);
+
+            // Bottom handles (Stop for Long, Target for Short)
+            drawBlueSquareHandle(boxLeft, bottomY);
+            drawBlueSquareHandle(midX, bottomY);
+            drawBlueSquareHandle(boxRight, bottomY);
           }
         }
       } else if (drawing.type === 'Gann box') {
@@ -2468,6 +2717,76 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       }
       ctx.restore();
     }
+
+    // Render Real-Time Moving Price & Countdown Badge on Price Axis (stacked layout)
+    const movingBadge = movingPriceBadgeRef.current;
+    if (movingBadge && movingBadge.price !== undefined && series) {
+      const y = series.priceToCoordinate(movingBadge.price);
+      if (y !== null && y >= -50 && y <= height + 50) {
+        let priceScaleWidth = 68;
+        try {
+          const ps = chart.priceScale('right');
+          if (ps && typeof ps.width === 'function') {
+            const pw = ps.width();
+            if (pw > 20) priceScaleWidth = pw;
+          }
+        } catch {}
+
+        if (priceScaleWidth === 68 && container) {
+          const lastTd = container.querySelector('table tr td:last-child') as HTMLElement | null;
+          if (lastTd && lastTd.clientWidth > 25) {
+            priceScaleWidth = lastTd.clientWidth;
+          }
+        }
+
+        const formattedPrice = formatMovingPrice(movingBadge.price, effectiveSymbol);
+        const hasCountdown = movingBadge.showCountdown && Boolean(movingBadge.timeStr);
+        
+        ctx.save();
+        ctx.font = 'bold 12px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif';
+        const priceTextWidth = ctx.measureText(formattedPrice).width;
+        const timeTextWidth = hasCountdown ? ctx.measureText(movingBadge.timeStr).width : 0;
+        const maxTextW = Math.max(priceTextWidth, timeTextWidth);
+
+        const badgeW = Math.max(priceScaleWidth, Math.ceil(maxTextW + 12));
+        const badgeH = hasCountdown ? 34 : 20;
+        const badgeX = Math.floor(width - badgeW);
+        const badgeY = Math.round(y - badgeH / 2);
+        const centerX = Math.round(badgeX + badgeW / 2);
+
+        // Draw Badge Background
+        ctx.fillStyle = movingBadge.color;
+        ctx.beginPath();
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 2);
+        } else {
+          ctx.rect(badgeX, badgeY, badgeW, badgeH);
+        }
+        ctx.fill();
+
+        // Draw High-Contrast Text
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        if (hasCountdown) {
+          // Price line (top)
+          ctx.font = 'bold 12px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif';
+          ctx.fillText(formattedPrice, centerX, badgeY + 10.5);
+
+          // Countdown timer line (bottom)
+          ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif';
+          ctx.fillText(movingBadge.timeStr, centerX, badgeY + 24.5);
+        } else {
+          // Single price line
+          ctx.font = 'bold 12px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif';
+          ctx.fillText(formattedPrice, centerX, badgeY + badgeH / 2);
+        }
+
+        ctx.restore();
+      }
+    }
+
     ctx.setLineDash([]);
     ctx.restore();
   } catch (e) {
@@ -2571,23 +2890,32 @@ export const TradingChart: React.FC<TradingChartProps> = ({
 
     setTimeLeft(timeStr);
     const isUp = currentPrice >= curCandle.open;
-    const lineColor = isUp ? '#26a69a' : '#ef5350';
+    const badgeColor = isUp ? '#089981' : '#f23645';
+
+    movingPriceBadgeRef.current = {
+      price: currentPrice,
+      timeStr,
+      isUp,
+      showCountdown: Boolean(showCountdown && timeStr),
+      color: badgeColor,
+    };
 
     try {
       if (!priceLineRef.current) {
         priceLineRef.current = seriesRef.current.createPriceLine({
           price: currentPrice,
-          color: lineColor,
+          color: badgeColor,
           lineWidth: 1,
           lineStyle: 2, // LineStyle.Dashed
-          axisLabelVisible: true,
-          title: timeStr,
+          axisLabelVisible: false,
+          title: '',
         });
       } else {
         priceLineRef.current.applyOptions({
           price: currentPrice,
-          color: lineColor,
-          title: timeStr,
+          color: badgeColor,
+          axisLabelVisible: false,
+          title: '',
         });
       }
     } catch (e) {
@@ -2598,7 +2926,10 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   // Periodic 1-second interval for countdown timer without destroying line
   useEffect(() => {
     updatePriceLine();
-    const interval = setInterval(updatePriceLine, 1000);
+    const interval = setInterval(() => {
+      updatePriceLine();
+      redrawDrawingsRef.current?.();
+    }, 1000);
     return () => clearInterval(interval);
   }, [updatePriceLine]);
 
@@ -2938,25 +3269,28 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         const xend = getXFromTime(timeScale, drawing.data.end?.time || ((drawing.data.entry.time as number) + 3600 * 20), candlesRef.current);
 
         if (xentry !== null && yentry !== null && ytp !== null && ysl !== null && xend !== null) {
-          const midX = (xentry + xend) / 2;
+          const boxLeft = Math.min(xentry, xend);
+          const boxRight = Math.max(xentry, xend);
+          const midX = (boxLeft + boxRight) / 2;
+
           // Target handles
-          if ((x - xentry) ** 2 + (y - ytp) ** 2 <= handleRadius ** 2 ||
-              (x - xend) ** 2 + (y - ytp) ** 2 <= handleRadius ** 2 ||
+          if ((x - boxLeft) ** 2 + (y - ytp) ** 2 <= handleRadius ** 2 ||
+              (x - boxRight) ** 2 + (y - ytp) ** 2 <= handleRadius ** 2 ||
               (x - midX) ** 2 + (y - ytp) ** 2 <= handleRadius ** 2) {
             return 'tp';
           }
           // Stop handles
-          if ((x - xentry) ** 2 + (y - ysl) ** 2 <= handleRadius ** 2 ||
-              (x - xend) ** 2 + (y - ysl) ** 2 <= handleRadius ** 2 ||
+          if ((x - boxLeft) ** 2 + (y - ysl) ** 2 <= handleRadius ** 2 ||
+              (x - boxRight) ** 2 + (y - ysl) ** 2 <= handleRadius ** 2 ||
               (x - midX) ** 2 + (y - ysl) ** 2 <= handleRadius ** 2) {
             return 'sl';
           }
-          // Entry left handle
-          if ((x - xentry) ** 2 + (y - yentry) ** 2 <= handleRadius ** 2) return 'entry';
+          // Start left handle
+          if ((x - boxLeft) ** 2 + (y - yentry) ** 2 <= handleRadius ** 2) return 'start';
           // End right handle
-          if ((x - xend) ** 2 + (y - yentry) ** 2 <= handleRadius ** 2) return 'end';
-          // Center card
-          if ((x - midX) ** 2 + (y - yentry) ** 2 <= (handleRadius + 15) ** 2) return 'mid';
+          if ((x - boxRight) ** 2 + (y - yentry) ** 2 <= handleRadius ** 2) return 'end';
+          // Center card / entry
+          if ((x - midX) ** 2 + (y - yentry) ** 2 <= (handleRadius + 18) ** 2) return 'mid';
         }
       } else if ((drawing.type === 'Horizontal ray' || drawing.type === 'Cross line') && drawing.data.time && drawing.data.price) {
         const x1 = getXFromTime(timeScale, drawing.data.time, candlesRef.current);
@@ -3074,10 +3408,10 @@ export const TradingChart: React.FC<TradingChartProps> = ({
           const xend = getXFromTime(timeScale, d.data.end?.time || ((d.data.entry.time as number) + 3600 * 20), candlesRef.current);
           if (xentry === null || yentry === null || ytp === null || ysl === null || xend === null) return false;
           
-          const left = Math.min(xentry, xend);
-          const right = Math.max(xentry, xend);
-          const top = Math.min(ytp, ysl, yentry);
-          const bottom = Math.max(ytp, ysl, yentry);
+          const left = Math.min(xentry, xend) - threshold;
+          const right = Math.max(xentry, xend) + threshold;
+          const top = Math.min(ytp, ysl, yentry) - threshold;
+          const bottom = Math.max(ytp, ysl, yentry) + threshold;
           return x >= left && x <= right && y >= top && y <= bottom;
         }
         if (d.type === 'Arrow' || d.type === 'Gann fan' || d.type === 'Fib time zone') {
@@ -3166,6 +3500,11 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       legendY += 20;
     });
 
+    // Don't start drawing or dragging if clicked inside floating toolbar or modal
+    if ((e.target as HTMLElement).closest('.floating-toolbar') || (e.target as HTMLElement).closest('.drawing-settings-modal')) {
+      return;
+    }
+
     if (!activeTool) {
       // 1. First priority: Check if user clicked directly on a handle of the currently selected drawing
       const curSelected = selectedDrawingIdRef.current 
@@ -3179,7 +3518,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
           setIsDragging(true);
           const timeScale = chartRef.current.timeScale();
           const startPrice = seriesRef.current.coordinateToPrice(y);
-          const startTime = timeScale.coordinateToTime(x);
+          const startTime = getTimeFromX(timeScale, x, candlesRef.current);
           setDragOffset({
             x,
             y,
@@ -3198,17 +3537,16 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       const drawing = findDrawingAt(x, y);
       if (drawing) {
         setSelectedDrawing(drawing.id);
-        setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
-        
-        // Don't start dragging if we clicked the toolbar
-        if ((e.target as HTMLElement).closest('.floating-toolbar')) return;
+        if (!toolbarPos && rect) {
+          setToolbarPos({ x: Math.round(rect.width / 2), y: 24 });
+        }
 
         if (!chartRef.current || !seriesRef.current) return;
         setIsDragging(true);
         const handle = findHandleAt(x, y, drawing);
         const timeScale = chartRef.current.timeScale();
         const startPrice = seriesRef.current.coordinateToPrice(y);
-        const startTime = timeScale.coordinateToTime(x);
+        const startTime = getTimeFromX(timeScale, x, candlesRef.current);
         setDragOffset({
           x,
           y,
@@ -3223,7 +3561,6 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       } else if (selectedDrawingId) {
         // If something was selected but we clicked on empty space, deselect
         setSelectedDrawing(null);
-        setToolbarPos(null);
       }
       return;
     }
@@ -3287,8 +3624,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       // Calculate bar interval for width
       let endTime = (time as number) + 3600 * 20;
       if (c && c.length >= 2) {
-        const cLastTime = typeof c[c.length - 1].time === 'number' ? c[c.length - 1].time : Math.floor(new Date(c[c.length - 1].time as string).getTime() / 1000);
-        const cPrevTime = typeof c[c.length - 2].time === 'number' ? c[c.length - 2].time : Math.floor(new Date(c[c.length - 2].time as string).getTime() / 1000);
+        const cLastTime = typeof c[c.length - 1].time === 'number' ? (c[c.length - 1].time as number) : Math.floor(new Date(String(c[c.length - 1].time)).getTime() / 1000);
+        const cPrevTime = typeof c[c.length - 2].time === 'number' ? (c[c.length - 2].time as number) : Math.floor(new Date(String(c[c.length - 2].time)).getTime() / 1000);
         const barInterval = Math.max(1, Math.abs(cLastTime - cPrevTime));
         endTime = (time as number) + barInterval * 20;
       }
@@ -3381,11 +3718,57 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     }
   };
 
+  const handleToolbarDragStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingToolbar(true);
+    const rect = chartContainerRef.current?.getBoundingClientRect();
+    const currentX = toolbarPos ? toolbarPos.x : (rect ? Math.round(rect.width / 2) : 200);
+    const currentY = toolbarPos ? toolbarPos.y : 24;
+    toolbarDragStartRef.current = {
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      initialX: currentX,
+      initialY: currentY
+    };
+  };
+
+  const handleDoubleClick = (e: any) => {
+    const rect = chartContainerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    const drawing = findDrawingAt(x, y);
+    if (drawing) {
+      setSelectedDrawing(drawing.id);
+      setIsDrawingSettingsOpen(true);
+    }
+  };
+
   const handleMouseMove = (e: any) => {
     const rect = chartContainerRef.current?.getBoundingClientRect();
     if (!rect) return;
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+
+    const inPriceScale = x > rect.width - 60;
+    const inTimeScale = y > rect.height - 26;
+    const inScale = inPriceScale || inTimeScale;
+
+    if (inScale !== isHoveringScale && e.buttons === 0) {
+      setIsHoveringScale(inScale);
+    }
+
+    // 0. Dragging the toolbar itself via its grip handle
+    if (isDraggingToolbar && toolbarDragStartRef.current && chartContainerRef.current) {
+      const dx = e.clientX - toolbarDragStartRef.current.mouseX;
+      const dy = e.clientY - toolbarDragStartRef.current.mouseY;
+      const newX = Math.max(10, Math.min(rect.width - 240, toolbarDragStartRef.current.initialX + dx));
+      const newY = Math.max(10, Math.min(rect.height - 60, toolbarDragStartRef.current.initialY + dy));
+      setToolbarPos({ x: newX, y: newY });
+      return;
+    }
 
     if (isDragging && selectedDrawingId && dragOffset) {
       const drawing = drawings.find(d => d.id === selectedDrawingId);
@@ -3395,26 +3778,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       const timeScale = chartRef.current.timeScale();
       const series = seriesRef.current;
       
-      let currentPrice = series.coordinateToPrice(y);
-      let currentTime = timeScale.coordinateToTime(x) as number;
-
-      if (currentTime === null) {
-        const c = candlesRef.current;
-        if (c.length > 0) {
-          const firstCandle = c[0];
-          const lastCandle = c[c.length - 1];
-          const firstTime = typeof firstCandle.time === 'number' ? firstCandle.time : Math.floor(new Date(firstCandle.time as string).getTime() / 1000);
-          const lastTime = typeof lastCandle.time === 'number' ? lastCandle.time : Math.floor(new Date(lastCandle.time as string).getTime() / 1000);
-          const firstX = timeScale.timeToCoordinate(firstTime as Time);
-          const lastX = timeScale.timeToCoordinate(lastTime as Time);
-          if (firstX !== null && lastX !== null && lastX > firstX) {
-            const timePerPx = (lastTime - firstTime) / (lastX - firstX);
-            currentTime = Math.round(lastTime + (x - lastX) * timePerPx);
-          } else {
-            currentTime = lastTime;
-          }
-        }
-      }
+      const currentPrice = series.coordinateToPrice(y);
+      const currentTime = getTimeFromX(timeScale, x, candlesRef.current);
 
       if (currentPrice === null || currentTime === null) return;
 
@@ -3424,14 +3789,21 @@ export const TradingChart: React.FC<TradingChartProps> = ({
 
       // 1. Resizing / expanding / reducing via handles
       if (handle === 'start') {
-        if (['Trendline', 'Ray', 'Extended line', 'Trend angle', 'Info line', 'Fib retracement', 'Arrow', 'Regression trend', 'Circle', 'Gann fan', 'Fib time zone'].includes(drawing.type)) {
+        if (['Long position', 'Short position'].includes(drawing.type)) {
+          updateDrawing(drawing.id, {
+            data: {
+              ...drawing.data,
+              entry: { ...drawing.data.entry, time: currentTime }
+            }
+          }, true);
+          return;
+        } else if (['Trendline', 'Ray', 'Extended line', 'Trend angle', 'Info line', 'Fib retracement', 'Arrow', 'Regression trend', 'Circle', 'Gann fan', 'Fib time zone'].includes(drawing.type)) {
           updateDrawing(drawing.id, {
             data: {
               ...drawing.data,
               start: { time: currentTime, price: currentPrice }
             }
-          });
-          setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
+          }, true);
           return;
         } else if (['Rectangle', 'Price range', 'Date range', 'Flat top/bottom', 'Gann box'].includes(drawing.type)) {
           updateDrawing(drawing.id, {
@@ -3439,8 +3811,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               ...drawing.data,
               start: { time: currentTime, price: currentPrice }
             }
-          });
-          setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
+          }, true);
           return;
         } else if (drawing.type === 'Horizontal ray' || drawing.type === 'Cross line') {
           updateDrawing(drawing.id, {
@@ -3449,8 +3820,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               time: currentTime,
               price: currentPrice
             }
-          });
-          setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
+          }, true);
           return;
         }
       } else if (handle === 'end') {
@@ -3460,8 +3830,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               ...drawing.data,
               end: { time: currentTime, price: currentPrice }
             }
-          });
-          setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
+          }, true);
           return;
         } else if (['Rectangle', 'Price range', 'Date range', 'Flat top/bottom', 'Gann box'].includes(drawing.type)) {
           updateDrawing(drawing.id, {
@@ -3469,8 +3838,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               ...drawing.data,
               end: { time: currentTime, price: currentPrice }
             }
-          });
-          setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
+          }, true);
           return;
         } else if (['Long position', 'Short position'].includes(drawing.type)) {
           updateDrawing(drawing.id, {
@@ -3478,8 +3846,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               ...drawing.data,
               end: { time: currentTime }
             }
-          });
-          setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
+          }, true);
           return;
         }
       } else if (handle === 'ne') {
@@ -3490,8 +3857,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               start: { time: drawing.data.start.time, price: currentPrice },
               end: { time: currentTime, price: drawing.data.end.price }
             }
-          });
-          setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
+          }, true);
           return;
         }
       } else if (handle === 'sw') {
@@ -3502,8 +3868,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               start: { time: currentTime, price: drawing.data.start.price },
               end: { time: drawing.data.end.time, price: currentPrice }
             }
-          });
-          setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
+          }, true);
           return;
         }
       } else if (handle === 'p1') {
@@ -3512,8 +3877,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             ...drawing.data,
             p1: { time: currentTime, price: currentPrice }
           }
-        });
-        setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
+        }, true);
         return;
       } else if (handle === 'p2') {
         updateDrawing(drawing.id, {
@@ -3521,8 +3885,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             ...drawing.data,
             p2: { time: currentTime, price: currentPrice }
           }
-        });
-        setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
+        }, true);
         return;
       } else if (handle === 'p3') {
         updateDrawing(drawing.id, {
@@ -3530,8 +3893,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             ...drawing.data,
             p3: { time: currentTime, price: currentPrice }
           }
-        });
-        setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
+        }, true);
         return;
       } else if (handle === 'tp') {
         updateDrawing(drawing.id, {
@@ -3539,8 +3901,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             ...drawing.data,
             tp: { price: currentPrice }
           }
-        });
-        setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
+        }, true);
         return;
       } else if (handle === 'sl') {
         updateDrawing(drawing.id, {
@@ -3548,17 +3909,19 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             ...drawing.data,
             sl: { price: currentPrice }
           }
-        });
-        setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
+        }, true);
         return;
       } else if (handle === 'entry') {
+        const initEntryPrice = dragOffset.initialData?.entry?.price ?? currentPrice;
+        const pDelta = currentPrice - initEntryPrice;
         updateDrawing(drawing.id, {
           data: {
             ...drawing.data,
-            entry: { time: currentTime, price: currentPrice }
+            entry: { ...drawing.data.entry, price: currentPrice },
+            tp: { price: (dragOffset.initialData?.tp?.price ?? currentPrice) + pDelta },
+            sl: { price: (dragOffset.initialData?.sl?.price ?? currentPrice) + pDelta }
           }
-        });
-        setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
+        }, true);
         return;
       }
 
@@ -3568,16 +3931,16 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       const isPosition = ['Long position', 'Short position'].includes(drawing.type);
 
       if (drawing.type === 'Horizontal line') {
-        updateDrawing(drawing.id, { data: { price: dragOffset.initialData.price + priceDelta } });
+        updateDrawing(drawing.id, { data: { price: dragOffset.initialData.price + priceDelta } }, true);
       } else if (drawing.type === 'Horizontal ray' || drawing.type === 'Cross line') {
         updateDrawing(drawing.id, { 
           data: { 
             price: dragOffset.initialData.price + priceDelta,
             time: dragOffset.initialData.time + timeDelta
           } 
-        });
+        }, true);
       } else if (drawing.type === 'Vertical line') {
-        updateDrawing(drawing.id, { data: { time: dragOffset.initialData.time + timeDelta } });
+        updateDrawing(drawing.id, { data: { time: dragOffset.initialData.time + timeDelta } }, true);
       } else if (isStartEnd) {
         updateDrawing(drawing.id, { 
           data: { 
@@ -3591,7 +3954,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               price: dragOffset.initialData.end.price + priceDelta 
             }
           } 
-        });
+        }, true);
       } else if (isMultiPoint) {
         updateDrawing(drawing.id, {
           data: {
@@ -3600,17 +3963,20 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             p2: { time: dragOffset.initialData.p2.time + timeDelta, price: dragOffset.initialData.p2.price + priceDelta },
             p3: { time: dragOffset.initialData.p3.time + timeDelta, price: dragOffset.initialData.p3.price + priceDelta }
           }
-        });
+        }, true);
       } else if (isPosition) {
         updateDrawing(drawing.id, {
           data: {
             ...drawing.data,
-            entry: { time: dragOffset.initialData.entry.time + timeDelta, price: dragOffset.initialData.entry.price + priceDelta },
-            tp: { price: dragOffset.initialData.tp.price + priceDelta },
-            sl: { price: dragOffset.initialData.sl.price + priceDelta },
-            end: { time: dragOffset.initialData.end.time + timeDelta }
+            entry: { 
+              time: (dragOffset.initialData?.entry?.time ?? currentTime) + timeDelta, 
+              price: (dragOffset.initialData?.entry?.price ?? currentPrice) + priceDelta 
+            },
+            tp: { price: (dragOffset.initialData?.tp?.price ?? currentPrice) + priceDelta },
+            sl: { price: (dragOffset.initialData?.sl?.price ?? currentPrice) + priceDelta },
+            end: { time: (dragOffset.initialData?.end?.time ?? (currentTime + 72000)) + timeDelta }
           }
-        });
+        }, true);
       } else if (drawing.type === 'Text' || drawing.type.startsWith('emoji')) {
         updateDrawing(drawing.id, {
           data: {
@@ -3618,10 +3984,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             time: dragOffset.initialData.time + timeDelta,
             price: dragOffset.initialData.price + priceDelta
           }
-        });
+        }, true);
       }
-      
-      setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
       return;
     }
 
@@ -3646,8 +4010,16 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   };
 
   const handleMouseUp = () => {
+    if (isDragging && selectedDrawingId) {
+      const cur = drawings.find(d => d.id === selectedDrawingId);
+      if (cur) {
+        updateDrawing(selectedDrawingId, { data: cur.data }, false);
+      }
+    }
     setIsDragging(false);
     setDragOffset(null);
+    setIsDraggingToolbar(false);
+    toolbarDragStartRef.current = null;
   };
 
   // Update data when displayCandles change (real-time ticks & incremental updates)
@@ -4014,10 +4386,11 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       />
 
       <div 
-        className={`absolute inset-0 z-[6] ${activeTool || selectedDrawingId || isHoveringDrawing ? 'pointer-events-auto' : 'pointer-events-none'}`} 
+        className={`absolute inset-0 z-[6] ${(!isHoveringScale || isDragging) && (activeTool || selectedDrawingId || isHoveringDrawing) ? 'pointer-events-auto' : 'pointer-events-none'}`} 
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
+        onDoubleClick={handleDoubleClick}
         style={{ 
           cursor: activeTool 
             ? 'crosshair' 
@@ -4025,65 +4398,322 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                 ? (dragOffset?.dragHandle && dragOffset.dragHandle !== 'body' && dragOffset.dragHandle !== 'mid' ? 'crosshair' : 'grabbing') 
                 : (hoveredHandle 
                     ? (hoveredHandle === 'mid' ? 'move' : 'crosshair') 
-                    : (isHoveringDrawing ? 'pointer' : 'default'))) 
+                    : (isHoveringDrawing ? 'pointer' : 'crosshair'))) 
         }}
       />
 
       {/* Floating Toolbar for Selected Drawing */}
-      {selectedDrawingId && toolbarPos && (
+      {selectedDrawingId && (
         <div 
-          className="fixed z-[100] bg-[#1e222d] border border-tv-border shadow-2xl rounded p-1 flex items-center gap-0.5 animate-in zoom-in-95 duration-100 floating-toolbar"
+          className="absolute z-[100] bg-[#1e222d] border border-[#2a2e39] shadow-2xl rounded-md p-1 flex items-center gap-0.5 animate-in zoom-in-95 duration-100 select-none"
           style={{ 
-            left: `${toolbarPos.x}px`, 
-            top: `${toolbarPos.y}px`,
+            left: '50%', 
+            top: '12px',
             transform: 'translateX(-50%)'
           }}
+          onMouseDown={(e) => e.stopPropagation()}
         >
-          {/* Color Section */}
-          <div className="relative flex items-center px-1 border-r border-tv-border mr-1">
-             <button 
-               onClick={() => setShowColorPicker(!showColorPicker)}
-               className="flex items-center gap-1 hover:bg-tv-hover p-1.5 rounded transition-colors"
-             >
-               <div 
-                 className="w-5 h-5 rounded-md shadow-sm border border-white/10" 
-                 style={{ backgroundColor: drawings.find(d => d.id === selectedDrawingId)?.color || '#2962ff' }} 
-               />
-               <ChevronDown className="w-3 h-3 text-tv-muted" />
-             </button>
-
-             {showColorPicker && (
-               <div className="absolute top-full left-0 mt-2 p-2 bg-[#1e222d] border border-tv-border rounded-lg shadow-2xl z-50 min-w-[140px]">
-                 <div className="grid grid-cols-5 gap-2">
-                   {TRADING_COLORS.map(color => (
-                     <button
-                       key={color}
-                       className="w-6 h-6 rounded-md hover:scale-110 transition-transform border border-white/5 shadow-sm"
-                       style={{ backgroundColor: color }}
-                       onClick={() => {
-                         updateDrawing(selectedDrawingId, { color });
-                         setShowColorPicker(false);
-                       }}
-                     />
-                   ))}
-                 </div>
-               </div>
-             )}
+          {/* Grip Icon (Visual only, no dragging) */}
+          <div className="px-1 py-1.5 text-[#787b86] cursor-default flex items-center">
+            <GripVertical className="w-3.5 h-3.5" />
           </div>
 
+          <button className="flex items-center justify-center w-8 h-8 hover:bg-[#2a2e39] rounded transition-colors group" title="Templates">
+            <LayoutGrid className="w-4 h-4 text-[#787b86] group-hover:text-[#d1d4dc]" />
+          </button>
+
+          {/* Type-specific tools */}
+          {(() => {
+            const drawing = drawings.find(d => d.id === selectedDrawingId);
+            if (!drawing) return null;
+            const isPosition = drawing.type === 'Long position' || drawing.type === 'Short position';
+            const isFib = ['Fib retracement', 'Fib extension', 'Trend-based fib extension', 'Fib channel', 'Fib time zone'].includes(drawing.type);
+
+            if (isPosition) {
+              return (
+                <>
+                  <button 
+                    className={`flex flex-col items-center justify-center w-8 h-8 hover:bg-[#2a2e39] rounded transition-colors group relative ${drawing.data?.showBadges !== false ? 'bg-[#2a2e39]' : ''}`} 
+                    title="Toggle Label"
+                    onClick={() => updateDrawing(selectedDrawingId, { data: { ...drawing.data, showBadges: drawing.data?.showBadges === false ? true : false } })}
+                  >
+                    <TypeIcon className="w-4 h-4 text-[#787b86] group-hover:text-[#d1d4dc] mb-0.5" />
+                  </button>
+                  {/* Target Fill Color */}
+                  <div className="relative flex items-center px-1">
+                    <button 
+                      onClick={() => setShowColorPicker(showColorPicker === 'target' ? false : 'target')}
+                      className="flex flex-col items-center justify-center w-8 h-8 hover:bg-[#2a2e39] rounded transition-colors group relative"
+                      title="Target Fill Color"
+                    >
+                      <PaintBucket className="w-4 h-4 text-[#787b86] group-hover:text-[#d1d4dc] mb-0.5" />
+                      <div className="w-4 h-1 rounded-sm shadow-sm absolute bottom-1.5" style={{ backgroundColor: drawing.color || '#089981' }} />
+                    </button>
+                    {showColorPicker === 'target' && (
+                      <div className="absolute top-full left-0 mt-2 p-2 bg-[#1e222d] border border-tv-border rounded-lg shadow-2xl z-50 min-w-[140px]">
+                        <div className="grid grid-cols-5 gap-2">
+                          {TRADING_COLORS.map(c => (
+                            <button
+                              key={c}
+                              className="w-6 h-6 rounded-md hover:scale-110 transition-transform border border-white/5 shadow-sm"
+                              style={{ backgroundColor: c }}
+                              onClick={() => {
+                                updateDrawing(selectedDrawingId, { color: c });
+                                setShowColorPicker(false);
+                              }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  {/* Stop Fill Color */}
+                  <div className="relative flex items-center px-1">
+                    <button 
+                      onClick={() => setShowColorPicker(showColorPicker === 'stop' ? false : 'stop')}
+                      className="flex flex-col items-center justify-center w-8 h-8 hover:bg-[#2a2e39] rounded transition-colors group relative"
+                      title="Stop Loss Fill Color"
+                    >
+                      <PaintBucket className="w-4 h-4 text-[#787b86] group-hover:text-[#d1d4dc] mb-0.5" />
+                      <div className="w-4 h-1 rounded-sm shadow-sm absolute bottom-1.5" style={{ backgroundColor: drawing.data?.stopColor || '#f23645' }} />
+                    </button>
+                    {showColorPicker === 'stop' && (
+                      <div className="absolute top-full left-0 mt-2 p-2 bg-[#1e222d] border border-tv-border rounded-lg shadow-2xl z-50 min-w-[140px]">
+                        <div className="grid grid-cols-5 gap-2">
+                          {TRADING_COLORS.map(c => (
+                            <button
+                              key={c}
+                              className="w-6 h-6 rounded-md hover:scale-110 transition-transform border border-white/5 shadow-sm"
+                              style={{ backgroundColor: c }}
+                              onClick={() => {
+                                updateDrawing(selectedDrawingId, { data: { ...drawing.data, stopColor: c } });
+                                setShowColorPicker(false);
+                              }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <button 
+                    className="flex items-center justify-center w-8 h-8 hover:bg-[#2a2e39] rounded transition-colors group mx-0.5" 
+                    title="Flip Long/Short"
+                    onClick={() => {
+                      updateDrawing(selectedDrawingId, { type: drawing.type === 'Long position' ? 'Short position' : 'Long position' });
+                    }}
+                  >
+                    <ArrowUpDown className="w-4 h-4 text-[#787b86] group-hover:text-[#d1d4dc]" />
+                  </button>
+                </>
+              );
+            } else if (isFib) {
+              return (
+                <>
+                  <div className="relative flex items-center px-1">
+                     <button 
+                       onClick={() => setShowColorPicker(showColorPicker === 'fib' ? false : 'fib')}
+                       className="flex flex-col items-center justify-center w-8 h-8 hover:bg-[#2a2e39] rounded transition-colors group relative"
+                       title="Levels Color"
+                     >
+                       <Pencil className="w-4 h-4 text-[#787b86] group-hover:text-[#d1d4dc] mb-0.5" />
+                       <div 
+                         className="w-4 h-1 rounded-sm shadow-sm absolute bottom-1.5" 
+                         style={{ background: drawing.color === 'rainbow' ? 'linear-gradient(to right, #f23645, #ff9800, #4caf50, #2962ff)' : (drawing.color || '#ff9800') }} 
+                       />
+                     </button>
+                     {showColorPicker === 'fib' && (
+                       <div className="absolute top-full left-0 mt-2 p-2 bg-[#1e222d] border border-tv-border rounded-lg shadow-2xl z-50 min-w-[140px]">
+                         <div className="grid grid-cols-5 gap-2">
+                           <button
+                             className="w-6 h-6 rounded-md hover:scale-110 transition-transform border border-white/5 shadow-sm col-span-5"
+                             style={{ background: 'linear-gradient(to right, #f23645, #ff9800, #4caf50, #2962ff)' }}
+                             onClick={() => {
+                               updateDrawing(selectedDrawingId, { color: 'rainbow' });
+                               setShowColorPicker(false);
+                             }}
+                           />
+                           {TRADING_COLORS.map(c => (
+                             <button
+                               key={c}
+                               className="w-6 h-6 rounded-md hover:scale-110 transition-transform border border-white/5 shadow-sm"
+                               style={{ backgroundColor: c }}
+                               onClick={() => {
+                                 updateDrawing(selectedDrawingId, { color: c });
+                                 setShowColorPicker(false);
+                               }}
+                             />
+                           ))}
+                         </div>
+                       </div>
+                     )}
+                  </div>
+                  <div className="relative flex items-center px-1">
+                    <button 
+                      onClick={() => setShowColorPicker(showColorPicker === 'fib-width' ? false : 'fib-width')}
+                      className="flex items-center gap-1 hover:bg-[#2a2e39] p-1.5 rounded transition-colors group" title="Line width"
+                    >
+                       <div className="w-4 bg-[#787b86] group-hover:bg-[#d1d4dc] rounded-full" style={{ height: `${Math.max(1, drawing.lineWidth || 2)}px` }} />
+                       <span className="text-[11px] font-medium text-[#787b86] group-hover:text-[#d1d4dc]">{drawing.lineWidth || 2}px</span>
+                    </button>
+                    {showColorPicker === 'fib-width' && (
+                       <div className="absolute top-full left-0 mt-2 py-1 bg-[#1e222d] border border-tv-border rounded-lg shadow-2xl z-50 min-w-[80px] flex flex-col">
+                         {[1, 2, 3, 4].map(w => (
+                           <button
+                             key={w}
+                             className="flex items-center gap-2 px-3 py-1.5 hover:bg-[#2a2e39] text-[#d1d4dc] text-xs transition-colors"
+                             onClick={() => {
+                               updateDrawing(selectedDrawingId, { lineWidth: w });
+                               setShowColorPicker(false);
+                             }}
+                           >
+                             <div className="w-4 bg-current rounded-full" style={{ height: `${w}px` }} />
+                             {w}px
+                           </button>
+                         ))}
+                       </div>
+                    )}
+                  </div>
+                </>
+              );
+            } else if (drawing.type === 'Text') {
+              return (
+                <>
+                  <div className="relative flex items-center px-1">
+                    <button 
+                      onClick={() => setShowColorPicker(showColorPicker === 'text' ? false : 'text')}
+                      className="flex flex-col items-center justify-center w-8 h-8 hover:bg-[#2a2e39] rounded transition-colors group relative" title="Text Color"
+                    >
+                      <TypeIcon className="w-4 h-4 text-[#787b86] group-hover:text-[#d1d4dc] mb-0.5" />
+                      <div className="w-4 h-1 rounded-sm shadow-sm absolute bottom-1.5" style={{ backgroundColor: drawing.color || '#2962ff' }} />
+                    </button>
+                    {showColorPicker === 'text' && (
+                      <div className="absolute top-full left-0 mt-2 p-2 bg-[#1e222d] border border-tv-border rounded-lg shadow-2xl z-50 min-w-[140px]">
+                        <div className="grid grid-cols-5 gap-2">
+                          {TRADING_COLORS.map(c => (
+                            <button
+                              key={c}
+                              className="w-6 h-6 rounded-md hover:scale-110 transition-transform border border-white/5 shadow-sm"
+                              style={{ backgroundColor: c }}
+                              onClick={() => {
+                                updateDrawing(selectedDrawingId, { color: c });
+                                setShowColorPicker(false);
+                              }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <button 
+                    className="flex flex-col items-center justify-center w-8 h-8 hover:bg-[#2a2e39] rounded transition-colors group relative mx-0.5" 
+                    title="Settings"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsDrawingSettingsOpen(true);
+                    }}
+                  >
+                    <Settings className="w-4 h-4 text-[#787b86] group-hover:text-[#d1d4dc]" />
+                  </button>
+                </>
+              );
+            } else {
+              // Standard Tool (Trend lines, etc)
+              return (
+                <>
+                  <div className="relative flex items-center px-1">
+                     <button 
+                       onClick={() => setShowColorPicker(showColorPicker === 'color' ? false : 'color')}
+                       className="flex flex-col items-center justify-center w-8 h-8 hover:bg-[#2a2e39] rounded transition-colors group relative"
+                       title="Color"
+                     >
+                       <Pencil className="w-4 h-4 text-[#787b86] group-hover:text-[#d1d4dc] mb-0.5" />
+                       <div 
+                         className="w-4 h-1 rounded-sm shadow-sm absolute bottom-1.5" 
+                         style={{ backgroundColor: drawing.color || '#2962ff' }} 
+                       />
+                     </button>
+                     {showColorPicker === 'color' && (
+                       <div className="absolute top-full left-0 mt-2 p-2 bg-[#1e222d] border border-tv-border rounded-lg shadow-2xl z-50 min-w-[140px]">
+                         <div className="grid grid-cols-5 gap-2">
+                           {TRADING_COLORS.map(c => (
+                             <button
+                               key={c}
+                               className="w-6 h-6 rounded-md hover:scale-110 transition-transform border border-white/5 shadow-sm"
+                               style={{ backgroundColor: c }}
+                               onClick={() => {
+                                 updateDrawing(selectedDrawingId, { color: c });
+                                 setShowColorPicker(false);
+                               }}
+                             />
+                           ))}
+                         </div>
+                       </div>
+                     )}
+                  </div>
+                  <button 
+                    className="flex flex-col items-center justify-center w-8 h-8 hover:bg-[#2a2e39] rounded transition-colors group relative" 
+                    title="Text / Settings"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsDrawingSettingsOpen(true);
+                    }}
+                  >
+                    <TypeIcon className="w-4 h-4 text-[#787b86] group-hover:text-[#d1d4dc] mb-0.5" />
+                  </button>
+                  <div className="relative flex items-center px-1">
+                    <button 
+                      onClick={() => setShowColorPicker(showColorPicker === 'width' ? false : 'width')}
+                      className="flex items-center gap-1 hover:bg-[#2a2e39] p-1.5 rounded transition-colors group" title="Line width"
+                    >
+                       <div className="w-4 bg-[#787b86] group-hover:bg-[#d1d4dc] rounded-full" style={{ height: `${Math.max(1, drawing.lineWidth || 2)}px` }} />
+                       <span className="text-[11px] font-medium text-[#787b86] group-hover:text-[#d1d4dc]">{drawing.lineWidth || 2}px</span>
+                    </button>
+                    {showColorPicker === 'width' && (
+                       <div className="absolute top-full left-0 mt-2 py-1 bg-[#1e222d] border border-tv-border rounded-lg shadow-2xl z-50 min-w-[80px] flex flex-col">
+                         {[1, 2, 3, 4].map(w => (
+                           <button
+                             key={w}
+                             className="flex items-center gap-2 px-3 py-1.5 hover:bg-[#2a2e39] text-[#d1d4dc] text-xs transition-colors"
+                             onClick={() => {
+                               updateDrawing(selectedDrawingId, { lineWidth: w });
+                               setShowColorPicker(false);
+                             }}
+                           >
+                             <div className="w-4 bg-current rounded-full" style={{ height: `${w}px` }} />
+                             {w}px
+                           </button>
+                         ))}
+                       </div>
+                    )}
+                  </div>
+                </>
+              );
+            }
+          })()}
+          
+          {/* Separator */}
+          <div className="w-[1px] h-4 bg-[#2a2e39] mx-1" />
+
           <div className="flex items-center gap-0.5">
-            <button className="w-8 h-8 flex items-center justify-center hover:bg-tv-hover rounded transition-colors group">
-              <Settings className="w-4 h-4 text-tv-muted group-hover:text-white" />
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsDrawingSettingsOpen(true);
+              }}
+              title="Settings"
+              className="w-8 h-8 flex items-center justify-center hover:bg-[#2a2e39] rounded transition-colors group"
+            >
+              <Settings className="w-4 h-4 text-[#787b86] group-hover:text-[#d1d4dc]" />
             </button>
             
             <button 
               onClick={() => {
-                const drawing = drawings.find(d => d.id === selectedDrawingId);
-                if (drawing) updateDrawing(selectedDrawingId, { hidden: !drawing.hidden });
+                  // Alert placeholder
               }}
-              className="w-8 h-8 flex items-center justify-center hover:bg-tv-hover rounded transition-colors group"
+              title="Add alert on drawing"
+              className="w-8 h-8 flex items-center justify-center hover:bg-[#2a2e39] rounded transition-colors group"
             >
-              <Eye className={`w-4 h-4 ${drawings.find(d => d.id === selectedDrawingId)?.hidden ? 'text-blue-500' : 'text-tv-muted group-hover:text-white'}`} />
+              <Clock className="w-4 h-4 text-[#787b86] group-hover:text-[#d1d4dc]" />
             </button>
 
             <button 
@@ -4091,12 +4721,13 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                 const drawing = drawings.find(d => d.id === selectedDrawingId);
                 if (drawing) updateDrawing(selectedDrawingId, { locked: !drawing.locked });
               }}
-              className="w-8 h-8 flex items-center justify-center hover:bg-tv-hover rounded transition-colors group"
+              title={drawings.find(d => d.id === selectedDrawingId)?.locked ? 'Unlock' : 'Lock'}
+              className="w-8 h-8 flex items-center justify-center hover:bg-[#2a2e39] rounded transition-colors group"
             >
               {drawings.find(d => d.id === selectedDrawingId)?.locked ? (
                 <Lock className="w-4 h-4 text-blue-500" />
               ) : (
-                <Unlock className="w-4 h-4 text-tv-muted group-hover:text-white" />
+                <Lock className="w-4 h-4 text-[#787b86] group-hover:text-[#d1d4dc] opacity-60 group-hover:opacity-100" />
               )}
             </button>
 
@@ -4105,22 +4736,40 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                     e.stopPropagation();
                     removeDrawing(selectedDrawingId);
                     setToolbarPos(null);
+                    setIsDrawingSettingsOpen(false);
                 }}
+                title="Remove"
                 className="w-8 h-8 flex items-center justify-center hover:bg-red-500/20 rounded transition-colors group"
             >
-              <Trash2 className="w-4 h-4 text-tv-muted group-hover:text-red-500" />
+              <Trash2 className="w-4 h-4 text-[#787b86] group-hover:text-red-400" />
+            </button>
+            
+            <button className="w-8 h-8 flex items-center justify-center hover:bg-[#2a2e39] rounded transition-colors group" title="More">
+              <MoreHorizontal className="w-4 h-4 text-[#787b86] group-hover:text-[#d1d4dc]" />
             </button>
           </div>
         </div>
+      )}
+
+      {/* Drawing Settings Modal */}
+      {isDrawingSettingsOpen && selectedDrawingId && (
+        <DrawingSettingsModal 
+          isOpen={isDrawingSettingsOpen}
+          drawing={drawings.find(d => d.id === selectedDrawingId) || null}
+          onClose={() => setIsDrawingSettingsOpen(false)}
+          onUpdate={(updates) => {
+            updateDrawing(selectedDrawingId, updates, false);
+          }}
+        />
       )}
 
       {/* Legend / Info Overlay */}
       <div className="absolute top-2 left-2 sm:left-6 z-10 pointer-events-none select-none">
         <div className="flex flex-col gap-0.5">
           <div className="flex items-center gap-1.5 flex-wrap">
-            <SymbolLogo symbol={activeSymbol} size="md" className="mr-0.5" />
+            <SymbolLogo symbol={effectiveSymbol} size="md" className="mr-0.5" />
             <span className="text-[12px] sm:text-[13px] font-bold text-tv-text uppercase">
-                {activeSymbol.replace(/^frx|^cry/i, '')} · {activeTimeframe}
+                {effectiveSymbol.replace(/^frx|^cry/i, '')} · {effectiveTimeframe}
             </span>
             <div className="flex items-center gap-1 ml-1 text-[13px]">
                <span className="w-1.5 h-1.5 rounded-full bg-[#2962ff]/30 border border-[#2962ff]" />
@@ -4128,10 +4777,10 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             </div>
             {lastCandle && (
                 <div className="hidden sm:flex items-center gap-2 text-[12px] font-medium text-tv-text ml-2">
-                    <span className="text-[#26a69a]">O<span className="text-tv-text ml-0.5">{formatSymbolPrice(lastCandle.open, activeSymbol)}</span></span>
-                    <span className="text-[#26a69a]">H<span className="text-tv-text ml-0.5">{formatSymbolPrice(lastCandle.high, activeSymbol)}</span></span>
-                    <span className="text-[#26a69a]">L<span className="text-tv-text ml-0.5">{formatSymbolPrice(lastCandle.low, activeSymbol)}</span></span>
-                    <span className="text-[#26a69a]">C<span className="text-tv-text ml-0.5">{formatSymbolPrice(lastCandle.close, activeSymbol)}</span></span>
+                    <span className="text-[#26a69a]">O<span className="text-tv-text ml-0.5">{formatSymbolPrice(lastCandle.open, effectiveSymbol)}</span></span>
+                    <span className="text-[#26a69a]">H<span className="text-tv-text ml-0.5">{formatSymbolPrice(lastCandle.high, effectiveSymbol)}</span></span>
+                    <span className="text-[#26a69a]">L<span className="text-tv-text ml-0.5">{formatSymbolPrice(lastCandle.low, effectiveSymbol)}</span></span>
+                    <span className="text-[#26a69a]">C<span className="text-tv-text ml-0.5">{formatSymbolPrice(lastCandle.close, effectiveSymbol)}</span></span>
                 </div>
             )}
           </div>
@@ -4151,7 +4800,27 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                     <span className={`text-[12px] font-medium transition-colors ${hidden ? 'text-tv-muted' : 'text-tv-text'}`}>
                       {indicator.name}
                     </span>
-                    {!hidden && data && (
+                    {!hidden && indicator.id.toLowerCase().includes('session') && (
+                      <div className="flex items-center gap-1.5 text-[10.5px] font-mono select-none">
+                        <span className="flex items-center gap-1 font-medium" style={{ color: indicator.params?.london_color || '#26a69a' }}>
+                          <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ backgroundColor: indicator.params?.london_color || '#26a69a' }} />
+                          {(indicator.params?.london_start || '03:00').replace(':', '')}-{(indicator.params?.london_end || '12:00').replace(':', '')}:1234567
+                        </span>
+                        <span className="flex items-center gap-1 font-medium" style={{ color: indicator.params?.ny_color || '#f59e0b' }}>
+                          <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ backgroundColor: indicator.params?.ny_color || '#f59e0b' }} />
+                          {(indicator.params?.ny_start || '08:00').replace(':', '')}-{(indicator.params?.ny_end || '17:00').replace(':', '')}:1234567
+                        </span>
+                        <span className="flex items-center gap-1 font-medium" style={{ color: indicator.params?.tokyo_color || '#00b4d8' }}>
+                          <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ backgroundColor: indicator.params?.tokyo_color || '#00b4d8' }} />
+                          {(indicator.params?.tokyo_start || '20:00').replace(':', '')}-{(indicator.params?.tokyo_end || '04:00').replace(':', '')}:1234567
+                        </span>
+                        <span className="flex items-center gap-1 font-medium" style={{ color: indicator.params?.sydney_color || '#ef5350' }}>
+                          <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ backgroundColor: indicator.params?.sydney_color || '#ef5350' }} />
+                          {(indicator.params?.sydney_start || '17:00').replace(':', '')}-{(indicator.params?.sydney_end || '02:00').replace(':', '')}:1234567
+                        </span>
+                      </div>
+                    )}
+                    {!hidden && data && !indicator.id.toLowerCase().includes('session') && (
                       data.name.toLowerCase().includes('delta') && data.deltaData && data.deltaData.length > 0 ? (
                         <span className="text-[11px] font-mono font-medium text-[#26a69a]">
                           {data.deltaData[data.deltaData.length - 1].delta >= 0 ? '+' : ''}{data.deltaData[data.deltaData.length - 1].delta} (CVD: {data.deltaData[data.deltaData.length - 1].cvd})

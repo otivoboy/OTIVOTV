@@ -1,6 +1,8 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
@@ -17,22 +19,6 @@
 
 @layer base {
   :root {
-    --tv-bg: #ffffff;
-    --tv-border: #e0e3eb;
-    --tv-hover: #f0f3fa;
-    --tv-text: #131722;
-    --tv-muted: #707584;
-    --tv-accent: #2962ff;
-
-    --color-tv-bg: #ffffff;
-    --color-tv-border: #e0e3eb;
-    --color-tv-hover: #f0f3fa;
-    --color-tv-text: #131722;
-    --color-tv-muted: #707584;
-    --color-tv-accent: #2962ff;
-  }
-
-  .dark {
     --tv-bg: #131722;
     --tv-border: #2a2e39;
     --tv-hover: #2a2e39;
@@ -45,6 +31,38 @@
     --color-tv-hover: #2a2e39;
     --color-tv-text: #d1d4dc;
     --color-tv-muted: #787b86;
+    --color-tv-accent: #2962ff;
+  }
+
+  .dark, html.dark {
+    --tv-bg: #131722;
+    --tv-border: #2a2e39;
+    --tv-hover: #2a2e39;
+    --tv-text: #d1d4dc;
+    --tv-muted: #787b86;
+    --tv-accent: #2962ff;
+
+    --color-tv-bg: #131722;
+    --color-tv-border: #2a2e39;
+    --color-tv-hover: #2a2e39;
+    --color-tv-text: #d1d4dc;
+    --color-tv-muted: #787b86;
+    --color-tv-accent: #2962ff;
+  }
+
+  .light, html.light, :root.light {
+    --tv-bg: #ffffff;
+    --tv-border: #e0e3eb;
+    --tv-hover: #f0f3fa;
+    --tv-text: #131722;
+    --tv-muted: #707584;
+    --tv-accent: #2962ff;
+
+    --color-tv-bg: #ffffff;
+    --color-tv-border: #e0e3eb;
+    --color-tv-hover: #f0f3fa;
+    --color-tv-text: #131722;
+    --color-tv-muted: #707584;
     --color-tv-accent: #2962ff;
   }
 
@@ -264,5 +282,22 @@ a[href*="tradingview.com"] {
   opacity: 0 !important;
   visibility: hidden !important;
   pointer-events: none !important;
+}
+
+/* TradingView Crosshair (+) cursor styling */
+.tv-chart-container,
+.tv-chart-container canvas,
+.tv-chart-container > div,
+.tv-crosshair-area {
+  cursor: crosshair !important;
+}
+
+.tv-chart-container button,
+.tv-chart-container input,
+.tv-chart-container select,
+.tv-chart-container [role="button"],
+.tv-clickable,
+.floating-toolbar button {
+  cursor: pointer !important;
 }
 

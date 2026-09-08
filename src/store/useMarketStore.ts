@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import { Candle, Tick, Timeframe, MarketSymbol, ChartType, PriceAlert, ChartSettings, SavedChartLayout, MultiChartLayoutType, ReplayState } from "../types";
 import { soundManager } from "../lib/soundEffects";
 import { saveToGoogleDrive, loadFromGoogleDrive } from "../lib/driveSync";
@@ -94,17 +95,17 @@ interface MarketState {
   setTimeframe: (tf: Timeframe) => void;
   addTick: (tick: Tick) => void;
   setCandles: (candles: Candle[]) => void;
-  setCandlesByTimeframe: (timeframe: string, candles: Candle[]) => void;
+  setCandlesByTimeframe: (timeframe: string, candles: Candle[], symbol?: string) => void;
   setMultiTimeframeCandles: (record: Record<string, Candle[]>) => void;
   updateCandle: (candle: Candle) => void;
-  updateCandleForTimeframe: (timeframe: string, candle: Candle) => void;
+  updateCandleForTimeframe: (timeframe: string, candle: Candle, symbol?: string) => void;
   setLoading: (loading: boolean) => void;
   toggleTheme: () => void;
   setTheme: (theme: 'light' | 'dark') => void;
   setActiveTool: (tool: string | null) => void;
   setSelectedDrawing: (id: string | null) => void;
   addDrawing: (drawing: Drawing) => void;
-  updateDrawing: (id: string, updates: Partial<Drawing>) => void;
+  updateDrawing: (id: string, updates: Partial<Drawing>, skipHistory?: boolean) => void;
   removeDrawing: (id: string) => void;
   clearDrawings: (symbol: string) => void;
   undoDrawing: () => void;
@@ -171,9 +172,9 @@ export const INITIAL_CURRENCY_PAIRS: MarketSymbol[] = [
   // Boom Indices
   { id: 'BOOM50', symbol: 'BOOM50', display: 'Boom 50 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
   { id: 'BOOM100', symbol: 'BOOM100', display: 'Boom 100 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
-  { id: 'BOOM150', symbol: 'BOOM150', display: 'Boom 150 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'BOOM150N', symbol: 'BOOM150N', display: 'Boom 150 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
   { id: 'BOOM200', symbol: 'BOOM200', display: 'Boom 200 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
-  { id: 'BOOM300', symbol: 'BOOM300', display: 'Boom 300 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'BOOM300N', symbol: 'BOOM300N', display: 'Boom 300 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
   { id: 'BOOM500', symbol: 'BOOM500', display: 'Boom 500 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
   { id: 'BOOM600', symbol: 'BOOM600', display: 'Boom 600 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
   { id: 'BOOM900', symbol: 'BOOM900', display: 'Boom 900 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
@@ -182,9 +183,9 @@ export const INITIAL_CURRENCY_PAIRS: MarketSymbol[] = [
   // Crash Indices
   { id: 'CRASH50', symbol: 'CRASH50', display: 'Crash 50 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
   { id: 'CRASH100', symbol: 'CRASH100', display: 'Crash 100 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
-  { id: 'CRASH150', symbol: 'CRASH150', display: 'Crash 150 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'CRASH150N', symbol: 'CRASH150N', display: 'Crash 150 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
   { id: 'CRASH200', symbol: 'CRASH200', display: 'Crash 200 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
-  { id: 'CRASH300', symbol: 'CRASH300', display: 'Crash 300 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'CRASH300N', symbol: 'CRASH300N', display: 'Crash 300 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
   { id: 'CRASH500', symbol: 'CRASH500', display: 'Crash 500 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
   { id: 'CRASH600', symbol: 'CRASH600', display: 'Crash 600 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
   { id: 'CRASH900', symbol: 'CRASH900', display: 'Crash 900 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
@@ -231,7 +232,9 @@ export const INITIAL_CURRENCY_PAIRS: MarketSymbol[] = [
 
 export const CURRENCY_PAIRS = INITIAL_CURRENCY_PAIRS;
 
-export const useMarketStore = create<MarketState>()((set, get) => ({
+export const useMarketStore = create<MarketState>()(
+  persist(
+    (set, get) => ({
   activeSymbol: INITIAL_CURRENCY_PAIRS[0].id,
       activeTimeframe: "1m",
       symbols: INITIAL_CURRENCY_PAIRS.map(p => p.id),
@@ -243,7 +246,7 @@ export const useMarketStore = create<MarketState>()((set, get) => ({
       prevTickPrice: null,
       marketTime: Math.floor(Date.now() / 1000),
       isLoading: true,
-      theme: 'light',
+      theme: 'dark',
       activePage: 'chart',
       activeTool: null,
       selectedDrawingId: null,
@@ -344,13 +347,25 @@ export const useMarketStore = create<MarketState>()((set, get) => ({
       toggleTheme: () => set((state) => {
         const newTheme = state.theme === 'light' ? 'dark' : 'light';
         if (typeof document !== 'undefined') {
-          document.documentElement.classList.toggle('dark', newTheme === 'dark');
+          if (newTheme === 'dark') {
+            document.documentElement.classList.add('dark');
+            document.documentElement.classList.remove('light');
+          } else {
+            document.documentElement.classList.remove('dark');
+            document.documentElement.classList.add('light');
+          }
         }
         return { theme: newTheme };
       }),
       setTheme: (theme) => {
         if (typeof document !== 'undefined') {
-          document.documentElement.classList.toggle('dark', theme === 'dark');
+          if (theme === 'dark') {
+            document.documentElement.classList.add('dark');
+            document.documentElement.classList.remove('light');
+          } else {
+            document.documentElement.classList.remove('dark');
+            document.documentElement.classList.add('light');
+          }
         }
         set({ theme });
       },
@@ -362,9 +377,9 @@ export const useMarketStore = create<MarketState>()((set, get) => ({
         drawings: [...state.drawings, drawing], 
         selectedDrawingId: drawing.id 
       })),
-      updateDrawing: (id, updates) => set((state) => ({
-        undoStack: [...state.undoStack, state.drawings],
-        redoStack: [],
+      updateDrawing: (id, updates, skipHistory) => set((state) => ({
+        undoStack: skipHistory ? state.undoStack : [...state.undoStack, state.drawings],
+        redoStack: skipHistory ? state.redoStack : [],
         drawings: state.drawings.map(d => d.id === id ? { ...d, ...updates } : d)
       })),
       removeDrawing: (id) => set((state) => ({ 
@@ -462,7 +477,10 @@ export const useMarketStore = create<MarketState>()((set, get) => ({
           marketTime: Math.max(state.marketTime || 0, lastTime || 0) 
         };
       }),
-      setCandlesByTimeframe: (tf, candles) => set((state) => {
+      setCandlesByTimeframe: (tf, candles, symbol) => set((state) => {
+        if (symbol && symbol.toLowerCase() !== state.activeSymbol.toLowerCase()) {
+          return {};
+        }
         const normalized = candles.map(c => ({
           ...c,
           time: typeof c.time === 'number' 
@@ -550,7 +568,10 @@ export const useMarketStore = create<MarketState>()((set, get) => ({
            candlesVersion: state.candlesVersion + 1
          };
       }),
-      updateCandleForTimeframe: (tf, candle) => set((state) => {
+      updateCandleForTimeframe: (tf, candle, symbol) => set((state) => {
+        if (symbol && symbol.toLowerCase() !== state.activeSymbol.toLowerCase()) {
+          return {};
+        }
         const candleTimeSec = typeof candle.time === 'number' 
           ? (candle.time > 1e11 ? Math.floor(candle.time / 1000) : candle.time) 
           : Math.floor(new Date(candle.time as string).getTime() / 1000);
@@ -871,5 +892,39 @@ export const useMarketStore = create<MarketState>()((set, get) => ({
           set({ isSyncingCloud: false });
         }
       }
-    })
+    }),
+    {
+      name: 'otivo-market-storage',
+      onRehydrateStorage: () => (state) => {
+        if (typeof document !== 'undefined') {
+          const theme = state?.theme || 'dark';
+          if (theme === 'dark') {
+            document.documentElement.classList.add('dark');
+            document.documentElement.classList.remove('light');
+          } else {
+            document.documentElement.classList.remove('dark');
+            document.documentElement.classList.add('light');
+          }
+        }
+      },
+      partialize: (state) => ({
+        activeSymbol: state.activeSymbol,
+        activeTimeframe: state.activeTimeframe,
+        theme: state.theme,
+        activePage: state.activePage,
+        savedScripts: state.savedScripts,
+        activeIndicators: state.activeIndicators,
+        hiddenIndicators: state.hiddenIndicators,
+        taTimeframe: state.taTimeframe,
+        pivotMode: state.pivotMode,
+        chartType: state.chartType,
+        alerts: state.alerts,
+        multiLayout: state.multiLayout,
+        savedLayouts: state.savedLayouts,
+        currentLayoutName: state.currentLayoutName,
+        chartSettings: state.chartSettings,
+        drawings: state.drawings
+      })
+    }
+  )
 );

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback, Fragment } from 'react';
 import { createPortal } from 'react-dom';
-import { io } from 'socket.io-client';
+// // import { io } from 'socket.io-client';
 import { derivClient, generateSeedCandles } from './lib/derivClient';
 import { 
   ChevronDown,
@@ -101,6 +101,18 @@ import { Tick, Candle } from './types';
 // Header Component
 const Header = () => {
   const { user, signOutUser } = useAuth();
+
+  const themeState = useMarketStore(s => s.theme);
+  useEffect(() => {
+    if (themeState === 'dark') {
+      document.documentElement.classList.add('dark');
+      document.documentElement.classList.remove('light');
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.documentElement.classList.add('light');
+    }
+  }, [themeState]);
+
   const { 
     activeSymbol, activeTimeframe, setTimeframe, setSymbol, theme, toggleTheme, 
     savedScripts, applyScript, activeIndicators, addIndicator, removeIndicator,
@@ -120,7 +132,7 @@ const Header = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [indicatorSearchQuery, setIndicatorSearchQuery] = useState('');
   const [indicatorTab, setIndicatorTab] = useState<'builtins' | 'scripts'>('builtins');
-  const [marketFilter, setMarketFilter] = useState<'all' | 'synthetic_index' | 'forex' | 'cryptocurrency' | 'commodities'>('all');
+  const [marketFilter, setMarketFilter] = useState<'all' | 'synthetic_index' | 'forex' | 'cryptocurrency' | 'commodities' | 'boom_crash'>('all');
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
@@ -993,7 +1005,9 @@ const Header = () => {
                   <span className="font-bold text-sm text-slate-100 truncate">
                     {user.displayName || (user.email ? user.email.split('@')[0] : 'Trader')}
                   </span>
-                  <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" title="Verified Trader" />
+                  <span title="Verified Trader">
+                    <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                  </span>
                 </div>
                 <span className="text-xs text-slate-400 truncate mt-0.5 font-mono">
                   {user.email || user.phoneNumber || 'Authenticated User'}
@@ -1295,18 +1309,18 @@ const DrawingToolbar = () => {
       <div className="w-8 h-px bg-tv-border my-1.5" />
       
       {/* Utility Tools Group */}
-      <button className="p-2.5 hover:bg-tv-hover rounded transition-colors group relative">
-        <Ruler className="w-5 h-5 text-tv-muted group-hover:text-tv-text" title="Measure" />
+      <button className="p-2.5 hover:bg-tv-hover rounded transition-colors group relative" title="Measure">
+        <Ruler className="w-5 h-5 text-tv-muted group-hover:text-tv-text" />
       </button>
-      <button className="p-2.5 hover:bg-tv-hover rounded transition-colors group relative">
-        <Search className="w-5 h-5 text-tv-muted group-hover:text-tv-text" title="Zoom In" />
+      <button className="p-2.5 hover:bg-tv-hover rounded transition-colors group relative" title="Zoom In">
+        <Search className="w-5 h-5 text-tv-muted group-hover:text-tv-text" />
       </button>
       
       <div className="w-8 h-px bg-tv-border my-1.5" />
       
       {/* Mode Tools Group */}
-      <button className="p-2.5 hover:bg-tv-hover rounded transition-colors group relative">
-        <Magnet className="w-5 h-5 text-tv-muted group-hover:text-tv-text" title="Magnet Mode" />
+      <button className="p-2.5 hover:bg-tv-hover rounded transition-colors group relative" title="Magnet Mode">
+        <Magnet className="w-5 h-5 text-tv-muted group-hover:text-tv-text" />
       </button>
       <button className="p-2.5 hover:bg-tv-hover rounded transition-colors group relative">
         <div className="relative">
@@ -1314,8 +1328,8 @@ const DrawingToolbar = () => {
           <Lock className="w-[10px] h-[10px] absolute -bottom-1 -right-1 text-tv-muted group-hover:text-tv-text bg-tv-bg rounded-full p-[1px]" />
         </div>
       </button>
-      <button className="p-2.5 hover:bg-tv-hover rounded transition-colors group relative">
-        <Lock className="w-5 h-5 text-tv-muted group-hover:text-tv-text" title="Lock All Drawing Tools" />
+      <button className="p-2.5 hover:bg-tv-hover rounded transition-colors group relative" title="Lock All Drawing Tools">
+        <Lock className="w-5 h-5 text-tv-muted group-hover:text-tv-text" />
       </button>
       <button className="p-2.5 hover:bg-tv-hover rounded transition-colors group relative">
         <div className="relative">
@@ -1714,19 +1728,33 @@ export default function App() {
   };
 
   useEffect(() => {
-    // Dismiss OTIVO initial native preloader with a smooth fade-out
+    if (typeof document !== 'undefined') {
+      if (theme === 'dark') {
+        document.documentElement.classList.add('dark');
+        document.documentElement.classList.remove('light');
+      } else {
+        document.documentElement.classList.remove('dark');
+        document.documentElement.classList.add('light');
+      }
+    }
+  }, [theme]);
+
+  useEffect(() => {
+    // Dismiss OTIVO initial native preloader smoothly as soon as auth check is ready
+    if (authLoading) return;
+
     const timer = setTimeout(() => {
       const el = document.getElementById('otivo-preloader-root');
       if (el) {
         el.classList.add('otivo-preloader-exit');
         setTimeout(() => {
           el.remove();
-        }, 700);
+        }, 500);
       }
-    }, 1400);
+    }, 200);
 
     return () => clearTimeout(timer);
-  }, []);
+  }, [authLoading]);
 
   useEffect(() => {
     // Start direct browser Deriv WebSocket connection (works on Netlify, static hosting & full-stack)
@@ -1739,70 +1767,8 @@ export default function App() {
       setCandles(initialSeed);
     }
 
-    // Try fetching active symbols from backend API if available
-    fetch('/api/symbols')
-      .then(res => res.json())
-      .then(data => {
-        if (data.symbols && data.symbols.length > 0) {
-          setAvailableSymbols(data.symbols);
-        }
-      })
-      .catch(() => {
-        // Backend not present (e.g. Netlify static hosting) - Deriv WS handles symbols directly
-      });
+    // Removed backend symbol fetching for full static-client mode
 
-    // Optional Socket.io connection for local dev/fullstack container with graceful fallback
-    try {
-      const socket = io({
-        reconnectionAttempts: 3,
-        timeout: 3000,
-        transports: ['websocket', 'polling']
-      });
-      socketRef.current = socket;
-      
-      socket.on('connect', () => {
-        console.log('Market socket.io connected');
-      });
-
-      socket.on('symbols', (symbolsList: any[]) => {
-        if (Array.isArray(symbolsList) && symbolsList.length > 0) {
-          setAvailableSymbols(symbolsList);
-        }
-      });
-
-      socket.on('tick', (tick: Tick) => {
-        addTick(tick);
-      });
-
-      socket.on('history', (data: { symbol: string, timeframe: string, candles: Candle[] }) => {
-        const state = useMarketStore.getState();
-        if (data.symbol.toLowerCase() === state.activeSymbol.toLowerCase()) {
-          if (data.timeframe === state.activeTimeframe) {
-            setCandles(data.candles);
-          }
-          state.setCandlesByTimeframe(data.timeframe, data.candles);
-        }
-      });
-
-      socket.on('candle_update', (data: { symbol: string, candlesByTimeframe: Record<string, Candle> }) => {
-        const state = useMarketStore.getState();
-        if (data.symbol.toLowerCase() === state.activeSymbol.toLowerCase()) {
-          const candle = data.candlesByTimeframe[state.activeTimeframe];
-          if (candle) {
-            updateCandle(candle);
-          }
-          if (data.candlesByTimeframe) {
-            Object.entries(data.candlesByTimeframe).forEach(([tf, c]) => {
-              if (c) {
-                state.updateCandleForTimeframe(tf, c);
-              }
-            });
-          }
-        }
-      });
-    } catch {
-      // Ignored for static deployments
-    }
 
     return () => {
       if (socketRef.current) {
@@ -1815,12 +1781,19 @@ export default function App() {
   useEffect(() => {
     let isMounted = true;
     
-    // 1. Instant fallback seed candles if new timeframe or symbol has no cache yet
+    // 1. Instant real cached candles if available, otherwise existing timeframe or fallback seed
     const state = useMarketStore.getState();
-    const existing = state.candlesByTimeframe[activeTimeframe];
-    if (!existing || existing.length === 0) {
-      const seed = generateSeedCandles(activeSymbol, activeTimeframe, 200);
-      setCandles(seed);
+    const cached = derivClient.getCachedCandles(activeSymbol, activeTimeframe);
+    if (cached && cached.length > 0) {
+      setCandles(cached);
+    } else {
+      const existing = state.candlesByTimeframe[activeTimeframe];
+      if (existing && existing.length > 0) {
+        setCandles(existing);
+      } else {
+        const seed = generateSeedCandles(activeSymbol, activeTimeframe, 200);
+        setCandles(seed);
+      }
     }
 
     // 2. Request deep 5000 candles and subscribe to live ticks & OHLC directly from Deriv Public WS
@@ -1832,32 +1805,7 @@ export default function App() {
       socketRef.current.emit('subscribe', { symbol: activeSymbol, timeframe: activeTimeframe });
     }
 
-    // 4. Try backend API fetch with silent catch if on static hosting (Netlify)
-    fetch(`/api/history?symbol=${encodeURIComponent(activeSymbol)}&timeframe=${encodeURIComponent(activeTimeframe)}`)
-      .then(res => res.json())
-      .then(data => {
-        if (isMounted && data.status === 'ok' && Array.isArray(data.candles) && data.candles.length > 0) {
-          const curState = useMarketStore.getState();
-          if (data.symbol.toLowerCase() === curState.activeSymbol.toLowerCase() && data.timeframe === curState.activeTimeframe) {
-            setCandles(data.candles);
-          }
-        }
-      })
-      .catch(() => {
-        // Handled seamlessly by Deriv WebSocket in derivClient
-      });
-
-    // 5. Try multi-history fetch with silent catch
-    fetch(`/api/multi-history?symbol=${encodeURIComponent(activeSymbol)}`)
-      .then(res => res.json())
-      .then(data => {
-        if (isMounted && data.status === 'ok' && data.candlesByTimeframe) {
-          useMarketStore.getState().setMultiTimeframeCandles(data.candlesByTimeframe);
-        }
-      })
-      .catch(() => {
-        // Handled seamlessly by Deriv WebSocket in derivClient
-      });
+    // Direct WebSocket subscriptions are already handling the live data stream and history fetching.
 
     return () => {
       isMounted = false;
@@ -1868,14 +1816,7 @@ export default function App() {
   }, [activeSymbol, activeTimeframe, setCandles]);
 
   if (authLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-[#07090e] text-slate-100">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-          <span className="text-xs text-slate-400 font-mono tracking-wider">INITIALIZING OTIVO TERMINAL...</span>
-        </div>
-      </div>
-    );
+    return <div className="flex items-center justify-center min-h-screen bg-tv-bg text-slate-100" />;
   }
 
   if (!user) {

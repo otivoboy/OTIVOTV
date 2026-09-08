@@ -72,6 +72,7 @@ export interface IndicatorBox {
   bordercolor: string;
   label?: string;
   borderstyle?: 'solid' | 'dashed' | 'dotted';
+  isVerticalBand?: boolean;
 }
 
 export interface FootprintCluster {
@@ -457,29 +458,37 @@ export function runPineEngine(
   }
 
   // ==========================================
-  // 1. SESSIONS INDICATOR (Asian, London, NY)
-  // ==========================================
+  // 1. SESSIONS INDICATOR (London, New York, Tokyo, Sydney)
+  // ========================================================
   if (idLower.includes('session')) {
-    const showAsian = params.show_asian ?? true;
-    const showLondon = params.show_london ?? true;
-    const showNY = params.show_ny ?? true;
-    const showBoxes = params.show_range_boxes ?? true;
-    const showOpenLine = params.show_open_lines ?? true;
+    const highLowView = !!(params.high_low_view || params.show_range_boxes);
+    const plotsBg = params.plots_bg ?? true;
+    const showOpenLine = params.show_open_lines ?? false;
 
-    // Check candle timeframe / interval: if daily or higher, sessions don't apply
+    // Check candle timeframe / interval: if daily or higher, intraday sessions don't apply
     const intervalSec = candles.length > 1 ? Math.abs(times[1] - times[0]) : 60;
     if (intervalSec >= 86400) {
-      // Daily/Weekly charts cannot display intraday hours
       return output;
     }
+
+    const parseSessionHour = (val: any, fallback: number): number => {
+      if (typeof val === 'number') return val;
+      if (typeof val === 'string' && val.includes(':')) {
+        const parts = val.split(':');
+        return (parseInt(parts[0], 10) || 0) + ((parseInt(parts[1], 10) || 0) / 60);
+      }
+      return fallback;
+    };
 
     interface SessionDef {
       name: string;
       active: boolean;
       startHour: number;
       endHour: number;
-      boxColor: string;
-      borderColor: string;
+      color: string;
+      bgColor: string;
+      showPlot: boolean;
+      showBg: boolean;
       currentBox: {
         startIdx: number;
         high: number;
@@ -489,36 +498,54 @@ export function runPineEngine(
       } | null;
     }
 
-    const asianBase = params.asian_color || '#9c27b0';
-    const londonBase = params.london_color || '#00b4d8';
-    const nyBase = params.ny_color || '#ff9800';
+    const londonBase = params.london_color || '#26a69a';
+    const nyBase = params.ny_color || '#f59e0b';
+    const tokyoBase = params.tokyo_color || params.asian_color || '#00b4d8';
+    const sydneyBase = params.sydney_color || '#ef5350';
 
     const sessionDefs: SessionDef[] = [
       {
-        name: 'Asian',
-        active: showAsian,
-        startHour: params.asian_start ?? 0,
-        endHour: params.asian_end ?? 9,
-        boxColor: toRgba(asianBase, 0.15, 'rgba(156, 39, 176, 0.15)'),
-        borderColor: toRgba(asianBase, 0.75, '#9c27b0'),
-        currentBox: null
-      },
-      {
         name: 'London',
-        active: showLondon,
-        startHour: params.london_start ?? 8,
-        endHour: params.london_end ?? 16.5,
-        boxColor: toRgba(londonBase, 0.15, 'rgba(0, 180, 216, 0.15)'),
-        borderColor: toRgba(londonBase, 0.75, '#00b4d8'),
+        active: params.london_active ?? params.show_london ?? true,
+        startHour: parseSessionHour(params.london_start, 3),
+        endHour: parseSessionHour(params.london_end, 12),
+        color: londonBase,
+        bgColor: params.london_bg_color || toRgba(londonBase, 0.18, 'rgba(38, 166, 154, 0.18)'),
+        showPlot: params.london_plot ?? true,
+        showBg: (params.london_bg ?? true) && plotsBg,
         currentBox: null
       },
       {
         name: 'New York',
-        active: showNY,
-        startHour: params.ny_start ?? 13,
-        endHour: params.ny_end ?? 21,
-        boxColor: toRgba(nyBase, 0.15, 'rgba(255, 152, 0, 0.15)'),
-        borderColor: toRgba(nyBase, 0.75, '#ff9800'),
+        active: params.ny_active ?? params.show_ny ?? true,
+        startHour: parseSessionHour(params.ny_start, 8),
+        endHour: parseSessionHour(params.ny_end, 17),
+        color: nyBase,
+        bgColor: params.ny_bg_color || toRgba(nyBase, 0.18, 'rgba(245, 158, 11, 0.18)'),
+        showPlot: params.ny_plot ?? true,
+        showBg: (params.ny_bg ?? true) && plotsBg,
+        currentBox: null
+      },
+      {
+        name: 'Tokyo',
+        active: params.tokyo_active ?? params.show_asian ?? true,
+        startHour: parseSessionHour(params.tokyo_start ?? params.asian_start, 20),
+        endHour: parseSessionHour(params.tokyo_end ?? params.asian_end, 4),
+        color: tokyoBase,
+        bgColor: params.tokyo_bg_color || toRgba(tokyoBase, 0.16, 'rgba(0, 180, 216, 0.16)'),
+        showPlot: params.tokyo_plot ?? true,
+        showBg: (params.tokyo_bg ?? true) && plotsBg,
+        currentBox: null
+      },
+      {
+        name: 'Sydney',
+        active: params.sydney_active ?? true,
+        startHour: parseSessionHour(params.sydney_start, 17),
+        endHour: parseSessionHour(params.sydney_end, 2),
+        color: sydneyBase,
+        bgColor: params.sydney_bg_color || toRgba(sydneyBase, 0.16, 'rgba(239, 83, 80, 0.16)'),
+        showPlot: params.sydney_plot ?? true,
+        showBg: (params.sydney_bg ?? true) && plotsBg,
         currentBox: null
       }
     ];
@@ -544,29 +571,29 @@ export function runPineEngine(
         if (inSession) {
           // If session was already open but day changed (for non-overnight sessions)
           if (sess.currentBox && sess.currentBox.dateKey !== dateKey && sess.startHour < sess.endHour) {
-            // Close previous day's session
             const startT = times[sess.currentBox.startIdx];
             const endT = times[idx - 1] || startT;
-            if (showBoxes) {
-              output.boxes.push({
-                id: `sess-${sess.name}-${startT}`,
-                x1: startT,
-                y1: sess.currentBox.high,
-                x2: endT,
-                y2: sess.currentBox.low,
-                color: sess.boxColor,
-                bordercolor: sess.borderColor,
-                label: `${sess.name} Session`
-              });
-            }
-            if (showOpenLine) {
+            
+            output.boxes.push({
+              id: `sess-${sess.name}-${startT}`,
+              x1: startT,
+              y1: highLowView ? sess.currentBox.high : 0,
+              x2: endT,
+              y2: highLowView ? sess.currentBox.low : 0,
+              color: sess.showBg ? sess.bgColor : 'transparent',
+              bordercolor: highLowView && sess.showPlot ? sess.color : 'transparent',
+              label: highLowView ? `${sess.name}` : undefined,
+              isVerticalBand: !highLowView
+            });
+
+            if (showOpenLine && highLowView) {
               output.lines.push({
                 id: `sess-open-${sess.name}-${startT}`,
                 x1: startT,
                 y1: sess.currentBox.openPrice,
                 x2: endT,
                 y2: sess.currentBox.openPrice,
-                color: sess.borderColor,
+                color: sess.color,
                 width: 1.2,
                 style: 'dashed',
                 label: `${sess.name} Open`
@@ -592,26 +619,27 @@ export function runPineEngine(
           if (sess.currentBox) {
             const startT = times[sess.currentBox.startIdx];
             const endT = times[idx - 1] || startT;
-            if (showBoxes) {
-              output.boxes.push({
-                id: `sess-${sess.name}-${startT}`,
-                x1: startT,
-                y1: sess.currentBox.high,
-                x2: endT,
-                y2: sess.currentBox.low,
-                color: sess.boxColor,
-                bordercolor: sess.borderColor,
-                label: `${sess.name} Session`
-              });
-            }
-            if (showOpenLine) {
+
+            output.boxes.push({
+              id: `sess-${sess.name}-${startT}`,
+              x1: startT,
+              y1: highLowView ? sess.currentBox.high : 0,
+              x2: endT,
+              y2: highLowView ? sess.currentBox.low : 0,
+              color: sess.showBg ? sess.bgColor : 'transparent',
+              bordercolor: highLowView && sess.showPlot ? sess.color : 'transparent',
+              label: highLowView ? `${sess.name}` : undefined,
+              isVerticalBand: !highLowView
+            });
+
+            if (showOpenLine && highLowView) {
               output.lines.push({
                 id: `sess-open-${sess.name}-${startT}`,
                 x1: startT,
                 y1: sess.currentBox.openPrice,
                 x2: endT,
                 y2: sess.currentBox.openPrice,
-                color: sess.borderColor,
+                color: sess.color,
                 width: 1.2,
                 style: 'dashed',
                 label: `${sess.name} Open`
@@ -628,26 +656,27 @@ export function runPineEngine(
       if (sess.active && sess.currentBox) {
         const startT = times[sess.currentBox.startIdx];
         const endT = times[times.length - 1];
-        if (showBoxes) {
-          output.boxes.push({
-            id: `sess-${sess.name}-${startT}-live`,
-            x1: startT,
-            y1: sess.currentBox.high,
-            x2: endT,
-            y2: sess.currentBox.low,
-            color: sess.boxColor,
-            bordercolor: sess.borderColor,
-            label: `${sess.name} (Live)`
-          });
-        }
-        if (showOpenLine) {
+
+        output.boxes.push({
+          id: `sess-${sess.name}-${startT}-live`,
+          x1: startT,
+          y1: highLowView ? sess.currentBox.high : 0,
+          x2: endT,
+          y2: highLowView ? sess.currentBox.low : 0,
+          color: sess.showBg ? sess.bgColor : 'transparent',
+          bordercolor: highLowView && sess.showPlot ? sess.color : 'transparent',
+          label: highLowView ? `${sess.name}` : undefined,
+          isVerticalBand: !highLowView
+        });
+
+        if (showOpenLine && highLowView) {
           output.lines.push({
             id: `sess-open-${sess.name}-${startT}-live`,
             x1: startT,
             y1: sess.currentBox.openPrice,
             x2: endT,
             y2: sess.currentBox.openPrice,
-            color: sess.borderColor,
+            color: sess.color,
             width: 1.2,
             style: 'dashed',
             label: `${sess.name} Open`

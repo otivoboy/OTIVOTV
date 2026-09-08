@@ -13,9 +13,7 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PUBLIC_DERIV_WS_URL = "wss://ws.derivws.com/websockets/v3?app_id=1089";
-const FALLBACK_DERIV_WS_URL = "wss://ws.binaryws.com/websockets/v3?app_id=1089";
-const ALT_DERIV_WS_URL = "wss://api.derivws.com/trading/v1/options/ws/public";
+const DERIV_WS_URL = "wss://api.derivws.com/trading/v1/options/ws/public?app_id=1089";
 
 export interface MarketSymbol {
   id: string;
@@ -42,9 +40,9 @@ const DEFAULT_SYMBOLS: MarketSymbol[] = [
   // Boom Indices
   { id: 'BOOM50', symbol: 'BOOM50', display: 'Boom 50 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
   { id: 'BOOM100', symbol: 'BOOM100', display: 'Boom 100 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
-  { id: 'BOOM150', symbol: 'BOOM150', display: 'Boom 150 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'BOOM150N', symbol: 'BOOM150N', display: 'Boom 150 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
   { id: 'BOOM200', symbol: 'BOOM200', display: 'Boom 200 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
-  { id: 'BOOM300', symbol: 'BOOM300', display: 'Boom 300 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'BOOM300N', symbol: 'BOOM300N', display: 'Boom 300 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
   { id: 'BOOM500', symbol: 'BOOM500', display: 'Boom 500 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
   { id: 'BOOM600', symbol: 'BOOM600', display: 'Boom 600 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
   { id: 'BOOM900', symbol: 'BOOM900', display: 'Boom 900 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
@@ -53,9 +51,9 @@ const DEFAULT_SYMBOLS: MarketSymbol[] = [
   // Crash Indices
   { id: 'CRASH50', symbol: 'CRASH50', display: 'Crash 50 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
   { id: 'CRASH100', symbol: 'CRASH100', display: 'Crash 100 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
-  { id: 'CRASH150', symbol: 'CRASH150', display: 'Crash 150 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'CRASH150N', symbol: 'CRASH150N', display: 'Crash 150 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
   { id: 'CRASH200', symbol: 'CRASH200', display: 'Crash 200 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
-  { id: 'CRASH300', symbol: 'CRASH300', display: 'Crash 300 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
+  { id: 'CRASH300N', symbol: 'CRASH300N', display: 'Crash 300 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
   { id: 'CRASH500', symbol: 'CRASH500', display: 'Crash 500 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
   { id: 'CRASH600', symbol: 'CRASH600', display: 'Crash 600 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
   { id: 'CRASH900', symbol: 'CRASH900', display: 'Crash 900 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
@@ -516,10 +514,31 @@ async function startServer() {
   // Deriv WebSocket Connection
   let derivWs: WebSocket | null = null;
   let reconnectTimer: NodeJS.Timeout | null = null;
-  let pingInterval: NodeJS.Timeout | null = null;
-  let livePollInterval: NodeJS.Timeout | null = null;
+  let pingTimer: NodeJS.Timeout | null = null;
+  let watchdogInterval: NodeJS.Timeout | null = null;
+  let reconnectDelay = 2000;
   let requestId = 0;
-  let currentWsUrl = PUBLIC_DERIV_WS_URL;
+  let lastWsMessageTime = Date.now();
+
+  function subscribeToTicks() {
+    if (!derivWs || derivWs.readyState !== WebSocket.OPEN) return;
+    for (const symbol of requestedSymbols) {
+      derivWs.send(JSON.stringify({
+        ticks: symbol,
+        subscribe: 1
+      }));
+    }
+  }
+
+  function scheduleReconnect() {
+    if (reconnectTimer) return;
+    console.warn(`⚠️ Deriv WS Closed. Initializing reconnect in ${reconnectDelay}ms...`);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      connectDeriv();
+    }, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+  }
 
   function fetchHistoryFromDeriv(symbol: string, timeframe: string, force = false) {
     if (!symbol || !derivWs || derivWs.readyState !== WebSocket.OPEN) return;
@@ -571,7 +590,7 @@ async function startServer() {
   }
 
   function subscribeToSymbol(symbol: string) {
-    if (!symbol || !derivWs || derivWs.readyState !== WebSocket.OPEN) return;
+    if (!symbol) return;
     
     // Normalize or validate against available Deriv symbols
     const targetSymbol = validDerivSymbols.has(symbol) 
@@ -586,101 +605,52 @@ async function startServer() {
     requestedSymbols.add(targetSymbol);
     ensureStore(targetSymbol);
 
+    if (derivWs?.readyState === WebSocket.OPEN) {
+      derivWs.send(JSON.stringify({
+        ticks: targetSymbol,
+        subscribe: 1
+      }));
+    }
+
     // Fetch deep candle history for primary timeframes
     prefetchAllTimeframesForSymbol(targetSymbol);
   }
 
   function connectDeriv() {
-    console.log(`📡 Connecting to Deriv Public WS: ${currentWsUrl}`);
+    if (derivWs) {
+      derivWs.removeAllListeners();
+      derivWs.terminate();
+    }
+
+    console.log(`📡 Connecting to Deriv Public WS: ${DERIV_WS_URL}`);
     try {
-      derivWs = new WebSocket(currentWsUrl);
+      derivWs = new WebSocket(DERIV_WS_URL);
     } catch (err: any) {
-      console.error(`❌ WS Instantiation failed for ${currentWsUrl}:`, err.message);
-      currentWsUrl = currentWsUrl === PUBLIC_DERIV_WS_URL ? FALLBACK_DERIV_WS_URL : (currentWsUrl === FALLBACK_DERIV_WS_URL ? ALT_DERIV_WS_URL : PUBLIC_DERIV_WS_URL);
-      reconnectTimer = setTimeout(connectDeriv, 3000);
+      console.error(`❌ WS Instantiation failed for ${DERIV_WS_URL}:`, err.message);
+      scheduleReconnect();
       return;
     }
 
     derivWs.on("open", () => {
-      console.log(`✅ Connected to Deriv WebSocket (${currentWsUrl})`);
+      console.log(`✅ Connected to Deriv WebSocket (${DERIV_WS_URL})`);
       subscribedSymbols.clear();
+      lastWsMessageTime = Date.now();
+      reconnectDelay = 2000;
 
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-      }
-
-      // Setup keep-alive ping
-      if (pingInterval) clearInterval(pingInterval);
-      pingInterval = setInterval(() => {
+      if (pingTimer) clearInterval(pingTimer);
+      pingTimer = setInterval(() => {
         if (derivWs?.readyState === WebSocket.OPEN) {
           derivWs.send(JSON.stringify({ ping: 1 }));
         }
       }, 15000);
 
-      // Fallback candle sync engine (every 20s to avoid rate limiting)
-      if (livePollInterval) clearInterval(livePollInterval);
-      livePollInterval = setInterval(() => {
-        if (derivWs?.readyState !== WebSocket.OPEN) return;
-
-        const symbolsToPoll = Array.from(requestedSymbols);
-        symbolsToPoll.forEach((sym, index) => {
-          setTimeout(() => {
-            if (derivWs?.readyState === WebSocket.OPEN) {
-              derivWs.send(JSON.stringify({
-                ticks_history: sym,
-                adjust_start_time: 1,
-                count: 3,
-                end: "latest",
-                style: "candles",
-                granularity: 60,
-                req_id: ++requestId,
-                passthrough: {
-                  symbol: sym,
-                  isLivePoll: true
-                }
-              }));
-            }
-          }, index * 200);
-        });
-      }, 20000);
-
-      // Continuous candle rollover engine (checks minute boundaries every 500ms)
-      const rolloverInterval = setInterval(() => {
-        const nowSec = Math.floor(Date.now() / 1000);
-        const curMinute = Math.floor(nowSec / 60) * 60;
-        
-        Array.from(requestedSymbols).forEach(sym => {
-          const m1Store = candlesStore["1m"]?.[sym];
-          if (!m1Store || m1Store.length === 0) return;
-          const lastCandle = m1Store[m1Store.length - 1];
-          const lastPrice = lastPrices[sym] || lastCandle.close;
-
-          if (curMinute > lastCandle.time) {
-            handleTick(sym, lastPrice, curMinute);
-            
-            // Broadcast tick and candle update to avoid any freeze
-            io.emit("tick", {
-              symbol: sym,
-              price: lastPrice,
-              time: Date.now()
-            });
-
-            const candleData = {
-              symbol: sym,
-              candlesByTimeframe: Object.keys(TIMEFRAMES).reduce((acc, tf) => {
-                 const store = candlesStore[tf]?.[sym];
-                 const last = store && store[store.length - 1];
-                 if (last) acc[tf] = last;
-                 return acc;
-              }, {} as Record<string, Candle>)
-            };
-
-            io.emit("candle_update", candleData);
-            io.to(sym).emit("candle_update", candleData);
-          }
-        });
-      }, 500);
+      if (watchdogInterval) clearInterval(watchdogInterval);
+      watchdogInterval = setInterval(() => {
+        if (Date.now() - lastWsMessageTime > 35000) {
+          console.warn("⚠️ Deriv WS watchdog triggered (silent for 35s). Terminating zombie connection...");
+          derivWs?.terminate();
+        }
+      }, 5000);
 
       // 1. Fetch all active symbols
       console.log("🌐 Requesting active symbols from Deriv...");
@@ -690,16 +660,13 @@ async function startServer() {
         req_id: ++requestId
       }));
 
-      // 2. Fetch history for requested symbols
-      Array.from(requestedSymbols).forEach((sym, index) => {
-        setTimeout(() => {
-          subscribeToSymbol(sym);
-        }, index * 150);
-      });
+      // 2. Restore subscriptions
+      subscribeToTicks();
     });
 
     derivWs.on("message", (data: any) => {
       try {
+        lastWsMessageTime = Date.now();
         const msg = JSON.parse(data.toString());
 
         // Handle Active Symbols response
@@ -728,52 +695,41 @@ async function startServer() {
           }
           return;
         }
+
+        // Handle live ticks
+        if (msg.msg_type === "tick" && msg.tick) {
+          const symbol = msg.tick.symbol;
+          const price = Number(msg.tick.quote);
+          const epoch = Number(msg.tick.epoch);
+
+          handleTick(symbol, price, epoch);
+
+          io.emit("tick", {
+            symbol,
+            price,
+            time: epoch * 1000
+          });
+
+          const candleData = {
+            symbol,
+            candlesByTimeframe: Object.keys(TIMEFRAMES).reduce((acc, tf) => {
+               const store = candlesStore[tf]?.[symbol];
+               const last = store && store[store.length - 1];
+               if (last) acc[tf] = last;
+               return acc;
+            }, {} as Record<string, Candle>)
+          };
+
+          io.emit("candle_update", candleData);
+          io.to(symbol).emit("candle_update", candleData);
+          return;
+        }
         
-        // Handle Candles response (both live poll and historical)
+        // Handle Historical Candles Response
         if (msg.msg_type === "candles" && Array.isArray(msg.candles)) {
           const symbol = msg.passthrough?.symbol || msg.echo_req?.ticks_history;
           if (!symbol) return;
 
-          // If this is a fast live poll response
-          if (msg.passthrough?.isLivePoll) {
-            if (msg.candles.length === 0) return;
-            const rawLast = msg.candles[msg.candles.length - 1];
-            const liveCandle: Candle = {
-              time: Number(rawLast.epoch),
-              open: parseFloat(rawLast.open),
-              high: parseFloat(rawLast.high),
-              low: parseFloat(rawLast.low),
-              close: parseFloat(rawLast.close)
-            };
-            
-            const livePrice = handleLiveCandleUpdate(symbol, liveCandle);
-
-            // Broadcast real-time tick with exact exchange price
-            io.emit("tick", {
-              symbol,
-              price: livePrice,
-              time: Date.now()
-            });
-
-            // Broadcast live candle updates for all timeframes
-            const candleData = {
-              symbol,
-              candlesByTimeframe: Object.keys(TIMEFRAMES).reduce((acc, tf) => {
-                 const store = candlesStore[tf] && candlesStore[tf][symbol];
-                 const last = store && store[store.length - 1];
-                 if (last) acc[tf] = last;
-                 return acc;
-              }, {} as Record<string, Candle>)
-            };
-
-            if (Object.keys(candleData.candlesByTimeframe).length > 0) {
-              io.emit("candle_update", candleData);
-              io.to(symbol).emit("candle_update", candleData);
-            }
-            return;
-          }
-
-          // Full Historical Candles Response
           const reqTf = msg.passthrough?.timeframe || GRANULARITY_TO_TIMEFRAME[msg.echo_req?.granularity] || "1m";
           
           console.log(`📈 Received history for ${symbol} [${reqTf}]: ${msg.candles.length} candles`);
@@ -857,11 +813,12 @@ async function startServer() {
             timeframe: reqTf,
             candles: parsedCandles
           });
-          
-        } else if (msg.msg_type === "ping") {
+          return;
+        }
+        
+        if (msg.msg_type === "ping") {
           // ping response, ignore
         } else if (msg.error) {
-          // Gracefully absorb Deriv rate-limit/info notices without polluting terminal with fatal warnings
           if (process.env.DEBUG_DERIV) {
             console.log(`[Deriv Info] (${msg.error.code}):`, msg.error.message);
           }
@@ -871,21 +828,20 @@ async function startServer() {
       }
     });
 
-    derivWs.on("error", (err) => {
+    derivWs.on("error", (err: any) => {
       console.error("❌ Deriv WS Connection Error:", err.message);
     });
 
     derivWs.on("close", () => {
-      console.warn("⚠️ Deriv WS Closed. Initializing reconnect...");
-      if (pingInterval) clearInterval(pingInterval);
-      if (livePollInterval) clearInterval(livePollInterval);
-      if (!reconnectTimer) {
-        reconnectTimer = setTimeout(() => {
-          // Alternate between URLs if connection dropped
-          currentWsUrl = currentWsUrl === PUBLIC_DERIV_WS_URL ? FALLBACK_DERIV_WS_URL : PUBLIC_DERIV_WS_URL;
-          connectDeriv();
-        }, 4000);
+      if (pingTimer) {
+        clearInterval(pingTimer);
+        pingTimer = null;
       }
+      if (watchdogInterval) {
+        clearInterval(watchdogInterval);
+        watchdogInterval = null;
+      }
+      scheduleReconnect();
     });
   }
 

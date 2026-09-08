@@ -1,9 +1,9 @@
 import { Candle, MarketSymbol, Tick, Timeframe } from '../types';
 import { useMarketStore, INITIAL_CURRENCY_PAIRS } from '../store/useMarketStore';
 
-const PUBLIC_DERIV_WS_URL = "wss://ws.derivws.com/websockets/v3?app_id=1089";
-const FALLBACK_DERIV_WS_URL = "wss://ws.binaryws.com/websockets/v3?app_id=1089";
-const ALT_DERIV_WS_URL = "wss://frontend.binaryws.com/websockets/v3?app_id=1089";
+const PUBLIC_DERIV_WS_URL = "wss://api.derivws.com/trading/v1/options/ws/public?app_id=1089";
+const FALLBACK_DERIV_WS_URL = "wss://api.derivws.com/trading/v1/options/ws/public?app_id=1089";
+const ALT_DERIV_WS_URL = "wss://api.derivws.com/trading/v1/options/ws/public?app_id=1089";
 
 const TIMEFRAMES: Record<string, number> = {
   "1m": 60,
@@ -168,11 +168,16 @@ export function generateSeedCandles(symbol: string, timeframe: string = '1m', co
   else if (symUpper.startsWith('BOOM50') || symUpper.startsWith('CRASH50')) { basePrice = 2500.0; volatility = 0.0025; }
   else if (symUpper.startsWith('BOOM') || symUpper.startsWith('CRASH')) { basePrice = 5000.0; volatility = 0.0025; }
   // Synthetic Volatility Indices
-  else if (symUpper.includes('1HZ100V') || symUpper.includes('R_100')) { basePrice = 2850.0; volatility = 0.004; }
-  else if (symUpper.includes('1HZ75V') || symUpper.includes('R_75')) { basePrice = 1850.0; volatility = 0.0035; }
-  else if (symUpper.includes('1HZ50V') || symUpper.includes('R_50')) { basePrice = 420.0; volatility = 0.0025; }
-  else if (symUpper.includes('1HZ25V') || symUpper.includes('R_25')) { basePrice = 850.0; volatility = 0.002; }
-  else if (symUpper.includes('1HZ10V') || symUpper.includes('R_10')) { basePrice = 1450.0; volatility = 0.0015; }
+  else if (symUpper.includes('1HZ100V')) { basePrice = 920.0; volatility = 0.003; }
+  else if (symUpper.includes('R_100')) { basePrice = 547.0; volatility = 0.003; }
+  else if (symUpper.includes('1HZ75V')) { basePrice = 6210.0; volatility = 0.0035; }
+  else if (symUpper.includes('R_75')) { basePrice = 46640.0; volatility = 0.0035; }
+  else if (symUpper.includes('1HZ50V')) { basePrice = 233150.0; volatility = 0.0025; }
+  else if (symUpper.includes('R_50')) { basePrice = 98.7; volatility = 0.0025; }
+  else if (symUpper.includes('1HZ25V')) { basePrice = 828800.0; volatility = 0.002; }
+  else if (symUpper.includes('R_25')) { basePrice = 2720.0; volatility = 0.002; }
+  else if (symUpper.includes('1HZ10V')) { basePrice = 9716.0; volatility = 0.0015; }
+  else if (symUpper.includes('R_10')) { basePrice = 4808.0; volatility = 0.0015; }
   // Forex JPY pairs
   else if (symUpper.includes('CHFJPY')) { basePrice = 175.40; volatility = 0.0006; }
   else if (symUpper.includes('GBPJPY')) { basePrice = 196.20; volatility = 0.0007; }
@@ -513,10 +518,11 @@ class DerivDirectClient {
         clientCandlesStore[tf][symbol] = finalCandles;
         
         const state = useMarketStore.getState();
-        state.setCandlesByTimeframe(tf, finalCandles);
-        
-        if (state.activeSymbol.toLowerCase() === symbol.toLowerCase() && state.activeTimeframe === tf) {
-          state.setCandles(finalCandles);
+        if (state.activeSymbol.toLowerCase() === symbol.toLowerCase()) {
+          state.setCandlesByTimeframe(tf, finalCandles, symbol);
+          if (state.activeTimeframe === tf) {
+            state.setCandles(finalCandles);
+          }
         }
 
         // Notify specific listeners for this symbol & timeframe
@@ -603,19 +609,20 @@ class DerivDirectClient {
     const price = liveCandle.close;
     lastPrices[symbol] = price;
     const state = useMarketStore.getState();
-    const tickObj: Tick = {
-      symbol: symbol,
-      price: price,
-      time: liveCandle.time * 1000
-    };
+    const isActiveSym = state.activeSymbol.toLowerCase() === symbol.toLowerCase();
 
-    if (state.activeSymbol.toLowerCase() === symbol.toLowerCase()) {
+    if (isActiveSym) {
+      const tickObj: Tick = {
+        symbol: symbol,
+        price: price,
+        time: liveCandle.time * 1000
+      };
       state.addTick(tickObj);
     }
     const tListeners = this.tickListeners.get(symbol.toLowerCase());
     if (tListeners) {
       tListeners.forEach(cb => {
-        try { cb(tickObj); } catch (err) { console.warn('Tick listener error:', err); }
+        try { cb({ symbol, price, time: liveCandle.time * 1000 }); } catch (err) { console.warn('Tick listener error:', err); }
       });
     }
 
@@ -639,18 +646,17 @@ class DerivDirectClient {
       if (m1Store.length > 5000) m1Store.shift();
       clientCandlesStore["1m"][symbol] = m1Store;
       targetM1Candle = newCandle;
-      state.updateCandleForTimeframe("1m", newCandle);
-      if (state.activeSymbol.toLowerCase() === symbol.toLowerCase() && state.activeTimeframe === "1m") {
-        state.updateCandle(newCandle);
-      }
     } else {
       m1Last.high = Math.max(m1Last.high, price);
       m1Last.low = Math.min(m1Last.low, price);
       m1Last.close = price;
       targetM1Candle = m1Last;
-      state.updateCandleForTimeframe("1m", m1Last);
-      if (state.activeSymbol.toLowerCase() === symbol.toLowerCase() && state.activeTimeframe === "1m") {
-        state.updateCandle(m1Last);
+    }
+
+    if (isActiveSym) {
+      state.updateCandleForTimeframe("1m", targetM1Candle, symbol);
+      if (state.activeTimeframe === "1m") {
+        state.updateCandle(targetM1Candle);
       }
     }
 
@@ -683,18 +689,17 @@ class DerivDirectClient {
         if (tfStore.length > 5000) tfStore.shift();
         clientCandlesStore[tf][symbol] = tfStore;
         targetTfCandle = newCandle;
-        state.updateCandleForTimeframe(tf, newCandle);
-        if (state.activeSymbol.toLowerCase() === symbol.toLowerCase() && state.activeTimeframe === tf) {
-          state.updateCandle(newCandle);
-        }
       } else {
         tfLast.high = Math.max(tfLast.high, price);
         tfLast.low = Math.min(tfLast.low, price);
         tfLast.close = price;
         targetTfCandle = tfLast;
-        state.updateCandleForTimeframe(tf, tfLast);
-        if (state.activeSymbol.toLowerCase() === symbol.toLowerCase() && state.activeTimeframe === tf) {
-          state.updateCandle(tfLast);
+      }
+
+      if (isActiveSym) {
+        state.updateCandleForTimeframe(tf, targetTfCandle, symbol);
+        if (state.activeTimeframe === tf) {
+          state.updateCandle(targetTfCandle);
         }
       }
 
@@ -709,9 +714,11 @@ class DerivDirectClient {
 
   private applyTickToCandles(symbol: string, price: number, epoch: number) {
     const state = useMarketStore.getState();
+    const isActiveSym = state.activeSymbol.toLowerCase() === symbol.toLowerCase();
     const minute = Math.floor(epoch / 60) * 60;
     const m1Store = clientCandlesStore["1m"]?.[symbol] || [];
     let lastCandle = m1Store[m1Store.length - 1];
+    let targetCandle: Candle;
 
     if (!lastCandle || minute > lastCandle.time) {
       const prevClose = lastCandle ? lastCandle.close : price;
@@ -725,17 +732,18 @@ class DerivDirectClient {
       m1Store.push(newCandle);
       if (m1Store.length > 5000) m1Store.shift();
       clientCandlesStore["1m"][symbol] = m1Store;
-      state.updateCandleForTimeframe("1m", newCandle);
-      if (state.activeSymbol.toLowerCase() === symbol.toLowerCase() && state.activeTimeframe === "1m") {
-        state.updateCandle(newCandle);
-      }
+      targetCandle = newCandle;
     } else {
       lastCandle.high = Math.max(lastCandle.high, price);
       lastCandle.low = Math.min(lastCandle.low, price);
       lastCandle.close = price;
-      state.updateCandleForTimeframe("1m", lastCandle);
-      if (state.activeSymbol.toLowerCase() === symbol.toLowerCase() && state.activeTimeframe === "1m") {
-        state.updateCandle(lastCandle);
+      targetCandle = lastCandle;
+    }
+
+    if (isActiveSym) {
+      state.updateCandleForTimeframe("1m", targetCandle, symbol);
+      if (state.activeTimeframe === "1m") {
+        state.updateCandle(targetCandle);
       }
     }
   }
