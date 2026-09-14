@@ -33,9 +33,10 @@ export const OscillatorPanel: React.FC<OscillatorPanelProps> = ({
   const plots = indicator.plots;
   const primaryPlot = plots[0] || [];
   const lastPoint = primaryPlot[primaryPlot.length - 1];
-  const isRSI = indicator.name.toLowerCase().includes('rsi');
+  const isRSI = indicator.name.toLowerCase().includes('rsi') && !indicator.name.toLowerCase().includes('banker');
   const isDelta = indicator.name.toLowerCase().includes('delta');
-  const isVolume = (indicator.name.toLowerCase() === 'volume' || indicator.id.toLowerCase().includes('volume') || indicator.id.toLowerCase().includes('default-vol')) && !isDelta && !indicator.name.toLowerCase().includes('liquidity');
+  const isBanker = indicator.id === 'banker_fund_flow_tdi_leo' || indicator.id.includes('banker_fund_flow') || indicator.name.toLowerCase().includes('banker fund flow') || indicator.name.toLowerCase().includes('tdi leo') || Boolean(indicator.bankerData);
+  const isVolume = (indicator.name.toLowerCase() === 'volume' || indicator.id.toLowerCase().includes('volume') || indicator.id.toLowerCase().includes('default-vol')) && !isDelta && !indicator.name.toLowerCase().includes('liquidity') && !isBanker;
 
   const formatVol = (val: number | null | undefined) => {
     if (val === null || val === undefined || isNaN(val)) return '--';
@@ -50,9 +51,11 @@ export const OscillatorPanel: React.FC<OscillatorPanelProps> = ({
         : (lastPoint?.value !== undefined && lastPoint?.value !== null ? lastPoint.value.toFixed(0) : '--'))
     : isVolume
     ? formatVol(lastPoint?.value)
+    : isBanker
+    ? (lastPoint && lastPoint.value !== null && !isNaN(lastPoint.value) ? `${lastPoint.value.toFixed(2)}` : '--')
     : (lastPoint && lastPoint.value !== null && !isNaN(lastPoint.value) ? lastPoint.value.toFixed(2) : '--');
 
-  const plotColor = isRSI ? '#ab47bc' : (isDelta ? '#ffffff' : isVolume ? (lastPoint?.color || '#26a69a') : (lastPoint?.color || '#2962ff'));
+  const plotColor = isRSI ? '#ab47bc' : (isDelta ? '#ffffff' : isBanker ? '#1dc72b' : isVolume ? (lastPoint?.color || '#26a69a') : (lastPoint?.color || '#2962ff'));
 
   const indicatorRef = useRef(indicator);
   const chartRef = useRef(chart);
@@ -609,7 +612,228 @@ export const OscillatorPanel: React.FC<OscillatorPanelProps> = ({
       ctx.restore();
     }
     // =========================================================
-    // D. GENERAL OSCILLATORS (DYNAMIC RANGE)
+    // D. BANKER FUND FLOW TREND OSCILLATOR WITH TDI LEO
+    // =========================================================
+    else if (isBanker) {
+      const minVal = 0;
+      const maxVal = 100;
+      const range = maxVal - minVal;
+      const valToY = (v: number) => paddingY + (1 - ((v - minVal) / range)) * chartH;
+
+      // 1. Shaded Overbought (85-90 purple) & Oversold (10-15 amber) Ribbon Zones
+      const y90 = valToY(90);
+      const y85 = valToY(85);
+      ctx.save();
+      ctx.fillStyle = 'rgba(223, 64, 251, 0.45)';
+      ctx.fillRect(0, y90, plotWidth, Math.max(2, y85 - y90));
+
+      const y15 = valToY(15);
+      const y10 = valToY(10);
+      ctx.fillStyle = 'rgba(255, 153, 0, 0.45)';
+      ctx.fillRect(0, y15, plotWidth, Math.max(2, y10 - y15));
+      ctx.restore();
+
+      // 2. Reference Lines (90, 85, 70, 50, 30, 15, 10)
+      const hlines = [
+        { val: 90, color: '#e040fb', style: 'dotted' },
+        { val: 85, color: '#ef5350', style: 'dotted' },
+        { val: 70, color: currentDark ? 'rgba(255, 255, 255, 0.25)' : 'rgba(0, 0, 0, 0.25)', style: 'dashed' },
+        { val: 50, color: currentDark ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.3)', style: 'dashed' },
+        { val: 30, color: currentDark ? 'rgba(255, 255, 255, 0.25)' : 'rgba(0, 0, 0, 0.25)', style: 'dashed' },
+        { val: 15, color: '#ffb300', style: 'dotted' },
+        { val: 10, color: '#76ff03', style: 'dotted' },
+      ];
+
+      ctx.save();
+      hlines.forEach(hl => {
+        const y = valToY(hl.val);
+        ctx.strokeStyle = hl.color;
+        ctx.lineWidth = 1;
+        if (hl.style === 'dashed') ctx.setLineDash([4, 4]);
+        else if (hl.style === 'dotted') ctx.setLineDash([2, 2]);
+        else ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(plotWidth, y);
+        ctx.stroke();
+      });
+      ctx.restore();
+
+      // 3. Banker Fund Flow Candle Bars (Green accumulation, White decrease, Red exit, Blue rebound)
+      if (currentIndicator.bankerData && currentIndicator.bankerData.length > 0) {
+        ctx.save();
+        const bankerPts = currentIndicator.bankerData;
+        for (let i = 0; i < bankerPts.length; i++) {
+          const pt = bankerPts[i];
+          const x = getXCoord(pt.time, i);
+          if (x === null || x < -20 || x > plotWidth + 20) continue;
+
+          let barW = 3.5;
+          if (i < bankerPts.length - 1) {
+            const nextX = getXCoord(bankerPts[i + 1].time, i + 1);
+            if (nextX !== null && nextX > x) {
+              barW = Math.max(1.5, Math.min(18, (nextX - x) * 0.75));
+            }
+          }
+
+          const yFt = valToY(pt.fundtrend);
+          const yBbl = valToY(pt.bullbearline);
+          const yTop = Math.min(yFt, yBbl);
+          const yBtm = Math.max(yFt, yBbl);
+          const barH = Math.max(2, yBtm - yTop);
+
+          ctx.fillStyle = pt.color;
+          ctx.fillRect(x - barW / 2, yTop, barW, barH);
+
+          // If banker entry signal, draw small diamond marker
+          if (pt.entrySignal) {
+            ctx.fillStyle = '#facc15';
+            ctx.beginPath();
+            ctx.arc(x, yTop - 5, 3, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        ctx.restore();
+      }
+
+      // 4. TDI Plot Curves (Volatility Upper/Lower, Market Baseline, RSI TrendLine, RSI Fast)
+      const plotsToDraw = [
+        { idx: 3, width: 1.2, color: '#80deea' }, // Vol Upper
+        { idx: 4, width: 1.2, color: '#80deea' }, // Vol Lower
+        { idx: 2, width: 2.0, color: '#ff9800' }, // Market Baseline
+        { idx: 1, width: 2.0, color: '#ff0000' }, // Trendline
+        { idx: 0, width: 2.0, color: '#1dc72b' }, // RSI Fast
+      ];
+
+      plotsToDraw.forEach(plotDef => {
+        const plotData = currentIndicator.plots[plotDef.idx];
+        if (!plotData || plotData.length < 2) return;
+
+        ctx.save();
+        ctx.lineWidth = plotDef.width;
+        ctx.strokeStyle = plotDef.color;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        let started = false;
+
+        for (let i = 0; i < plotData.length; i++) {
+          const pt = plotData[i];
+          if (pt.value === null || isNaN(pt.value)) continue;
+          const x = getXCoord(pt.time as number, i);
+          if (x === null) continue;
+          const y = valToY(pt.value);
+
+          if (!started) {
+            ctx.moveTo(x, y);
+            started = true;
+          } else {
+            ctx.lineTo(x, y);
+          }
+        }
+        if (started) ctx.stroke();
+        ctx.restore();
+      });
+
+      // 5. Divergence Lines
+      if (currentIndicator.lines && currentIndicator.lines.length > 0) {
+        ctx.save();
+        currentIndicator.lines.forEach(line => {
+          const x1 = getXCoord(line.x1, 0);
+          const x2 = getXCoord(line.x2, 0);
+          if (x1 === null || x2 === null) return;
+          const y1 = valToY(line.y1);
+          const y2 = valToY(line.y2);
+
+          ctx.beginPath();
+          ctx.strokeStyle = line.color || '#ff5252';
+          ctx.lineWidth = line.width || 2;
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.stroke();
+
+          ctx.fillStyle = line.color || '#ff5252';
+          ctx.beginPath();
+          ctx.arc(x1, y1, 3, 0, Math.PI * 2);
+          ctx.arc(x2, y2, 3, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        ctx.restore();
+      }
+
+      // 6. Divergence Badges/Labels ("Bear", "Bull", "H Bear", "H Bull")
+      if (currentIndicator.labels && currentIndicator.labels.length > 0) {
+        ctx.save();
+        currentIndicator.labels.forEach(label => {
+          const x = getXCoord(label.x, 0);
+          if (x === null || x < 0 || x > plotWidth) return;
+          const y = valToY(label.y);
+
+          ctx.font = 'bold 9px "Inter", sans-serif';
+          const textMetrics = ctx.measureText(label.text);
+          const bgW = textMetrics.width + 8;
+          const bgH = 14;
+          const badgeX = x - bgW / 2;
+          const badgeY = y - bgH / 2;
+
+          ctx.fillStyle = label.color || '#ef5350';
+          if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(badgeX, badgeY, bgW, bgH, 3);
+            ctx.fill();
+          } else {
+            ctx.fillRect(badgeX, badgeY, bgW, bgH);
+          }
+
+          ctx.fillStyle = label.textcolor || '#ffffff';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(label.text, x, y);
+        });
+        ctx.restore();
+      }
+
+      // 7. Right Scale Axis labels & badges
+      ctx.save();
+      ctx.font = '10px "JetBrains Mono", monospace';
+      ctx.fillStyle = currentDark ? '#94a3b8' : '#64748b';
+      ctx.textAlign = 'left';
+
+      const axisTicks = [100, 90, 85, 70, 50, 30, 15, 10, 0];
+      axisTicks.forEach(tickVal => {
+        const y = valToY(tickVal);
+        if (y >= paddingY - 2 && y <= height - paddingY + 2) {
+          ctx.fillText(tickVal.toFixed(1), plotWidth + 6, y + 3.5);
+        }
+      });
+
+      // Right scale badges for key active curves (matching TradingView display)
+      const badgeDefs = [
+        { plotIdx: 0, color: '#1dc72b' }, // RSI Fast (Green)
+        { plotIdx: 1, color: '#FF0000' }, // RSI TrendLine (Red)
+        { plotIdx: 3, color: '#ab47bc' }, // Vol Upper (Purple)
+        { plotIdx: 2, color: '#ff9800' }, // Market Baseline (Orange)
+        { plotIdx: 4, color: '#0288d1' }, // Vol Lower (Blue)
+      ];
+
+      badgeDefs.forEach(b => {
+        const series = currentIndicator.plots[b.plotIdx];
+        const lastPt = series ? series[series.length - 1] : null;
+        const val = (lastPt && lastPt.value !== null && !isNaN(lastPt.value)) ? lastPt.value : null;
+        if (val !== null) {
+          const pillY = Math.max(10, Math.min(height - 10, valToY(val)));
+          ctx.fillStyle = b.color;
+          ctx.fillRect(plotWidth + 1, pillY - 8, rightScaleWidth - 2, 16);
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 9px "JetBrains Mono", monospace';
+          ctx.textAlign = 'left';
+          ctx.fillText(val.toFixed(2), plotWidth + 4, pillY + 3.5);
+        }
+      });
+      ctx.restore();
+    }
+    // =========================================================
+    // E. GENERAL OSCILLATORS (DYNAMIC RANGE)
     // =========================================================
     else {
       let minVal = Infinity;
@@ -742,36 +966,73 @@ export const OscillatorPanel: React.FC<OscillatorPanelProps> = ({
         <div className="w-12 h-0.5 bg-[#e0e3eb] dark:bg-[#2a2e39] rounded-full group-hover/panel:bg-[#2962ff] opacity-0 group-hover/panel:opacity-100 transition-opacity" />
       </div>
 
-      {/* Panel Top Header / Legend */}
-      <div className="absolute top-2 left-3 z-10 flex items-center gap-2 pointer-events-auto bg-white/90 dark:bg-[#131722]/90 backdrop-blur-sm px-2 py-0.5 rounded-md border border-[#e0e3eb] dark:border-[#2a2e39] shadow-xs">
-        <span className="text-xs font-semibold text-[#131722] dark:text-[#d1d4dc] flex items-center gap-1.5">
+      {/* Panel Top Header / Legend (Hidden on mobile view to prevent blocking oscillator canvas) */}
+      <div className="hidden sm:flex absolute top-2 left-3 z-10 items-center gap-2 pointer-events-auto bg-white/90 dark:bg-[#131722]/90 backdrop-blur-sm px-2 py-0.5 rounded-md border border-[#e0e3eb] dark:border-[#2a2e39] shadow-xs max-w-[calc(100%-70px)] whitespace-nowrap">
+        <span className="text-xs font-semibold text-[#131722] dark:text-[#d1d4dc] flex items-center gap-1.5 shrink-0 truncate max-w-[200px] md:max-w-[320px]">
           <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: plotColor }} />
-          {indicator.name}
+          <span className="truncate">{indicator.name}</span>
         </span>
+        {/* Values */}
         {!isHidden && (
-          <span className="text-xs font-mono font-bold" style={{ color: plotColor }}>
-            {lastValue}
-          </span>
+          isBanker ? (
+            <div className="flex items-center gap-2 font-mono text-[11px] font-bold shrink-0">
+              {indicator.plots[0]?.[indicator.plots[0].length - 1]?.value != null && (
+                <span style={{ color: '#1dc72b' }}>
+                  {indicator.plots[0][indicator.plots[0].length - 1].value?.toFixed(2)}
+                </span>
+              )}
+              {indicator.plots[1]?.[indicator.plots[1].length - 1]?.value != null && (
+                <span style={{ color: '#FF0000' }}>
+                  {indicator.plots[1][indicator.plots[1].length - 1].value?.toFixed(2)}
+                </span>
+              )}
+              {indicator.plots[3]?.[indicator.plots[3].length - 1]?.value != null && (
+                <span style={{ color: '#ab47bc' }}>
+                  {indicator.plots[3][indicator.plots[3].length - 1].value?.toFixed(2)}
+                </span>
+              )}
+              {indicator.plots[2]?.[indicator.plots[2].length - 1]?.value != null && (
+                <span style={{ color: '#ff9800' }}>
+                  {indicator.plots[2][indicator.plots[2].length - 1].value?.toFixed(2)}
+                </span>
+              )}
+              {indicator.plots[4]?.[indicator.plots[4].length - 1]?.value != null && (
+                <span style={{ color: '#0288d1' }}>
+                  {indicator.plots[4][indicator.plots[4].length - 1].value?.toFixed(2)}
+                </span>
+              )}
+            </div>
+          ) : (
+            <span className="text-xs font-mono font-bold" style={{ color: plotColor }}>
+              {lastValue}
+            </span>
+          )
         )}
-        <div className="flex items-center gap-0.5 ml-1">
+        <div id={`oscillator-actions-${indicator.id}`} className="flex items-center gap-0.5 ml-1 shrink-0">
           <button
+            id={`oscillator-hide-btn-${indicator.id}`}
             onClick={() => onToggleVisibility(indicator.id)}
-            className="p-1 hover:bg-[#f0f3fa] dark:hover:bg-[#2a2e39] rounded text-[#707584] dark:text-[#787b86] hover:text-[#131722] dark:hover:text-[#d1d4dc] transition-colors cursor-pointer"
+            className="p-1.5 sm:p-1 hover:bg-[#f0f3fa] dark:hover:bg-[#2a2e39] active:bg-[#f0f3fa] dark:active:bg-[#2a2e39] rounded text-[#707584] dark:text-[#787b86] hover:text-[#131722] dark:hover:text-[#d1d4dc] transition-colors cursor-pointer touch-manipulation"
             title={isHidden ? 'Show' : 'Hide'}
+            aria-label={isHidden ? 'Show panel' : 'Hide panel'}
           >
             {isHidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
           </button>
           <button
+            id={`oscillator-settings-btn-${indicator.id}`}
             onClick={() => onOpenSettings(indicator.id)}
-            className="p-1 hover:bg-[#f0f3fa] dark:hover:bg-[#2a2e39] rounded text-[#707584] dark:text-[#787b86] hover:text-[#131722] dark:hover:text-[#d1d4dc] transition-colors cursor-pointer"
+            className="p-1.5 sm:p-1 hover:bg-[#f0f3fa] dark:hover:bg-[#2a2e39] active:bg-[#f0f3fa] dark:active:bg-[#2a2e39] rounded text-[#707584] dark:text-[#787b86] hover:text-[#131722] dark:hover:text-[#d1d4dc] transition-colors cursor-pointer touch-manipulation"
             title="Settings"
+            aria-label="Panel settings"
           >
             <Settings className="w-3.5 h-3.5" />
           </button>
           <button
+            id={`oscillator-remove-btn-${indicator.id}`}
             onClick={() => onRemove(indicator.id)}
-            className="p-1 hover:bg-[#f0f3fa] dark:hover:bg-[#2a2e39] rounded text-[#707584] dark:text-[#787b86] hover:text-red-500 dark:hover:text-red-400 transition-colors cursor-pointer"
+            className="p-1.5 sm:p-1 hover:bg-[#f0f3fa] dark:hover:bg-[#2a2e39] active:bg-[#f0f3fa] dark:active:bg-[#2a2e39] rounded text-[#707584] dark:text-[#787b86] hover:text-red-500 dark:hover:text-red-400 transition-colors cursor-pointer touch-manipulation"
             title="Close Pane"
+            aria-label="Close pane"
           >
             <X className="w-3.5 h-3.5" />
           </button>

@@ -143,10 +143,48 @@ export interface CVDLine {
   type?: 'REGULAR_BULLISH' | 'REGULAR_BEARISH' | 'HIDDEN_BULLISH' | 'HIDDEN_BEARISH';
 }
 
+export interface BankerFundFlowPoint {
+  time: number;
+  fundtrend: number;
+  bullbearline: number;
+  color: string;
+  entrySignal?: boolean;
+}
+
+export interface OscillatorHLine {
+  value: number;
+  color: string;
+  style?: 'solid' | 'dashed' | 'dotted';
+  label?: string;
+}
+
+export interface OscillatorBandZone {
+  top: number;
+  bottom: number;
+  color: string;
+  label?: string;
+}
+
 export interface IndicatorBand {
   upperIndex: number;
   lowerIndex: number;
   color: string;
+}
+
+export interface IndicatorTableCell {
+  text: string;
+  color?: string;
+  bgColor?: string;
+  align?: 'left' | 'center' | 'right';
+  bold?: boolean;
+}
+
+export interface IndicatorTable {
+  id: string;
+  title?: string;
+  position?: 'top_left' | 'top_right' | 'bottom_left' | 'bottom_right' | 'top_center' | 'bottom_center' | 'middle_right' | 'middle_center';
+  size?: 'large' | 'normal' | 'small' | 'tiny';
+  rows: IndicatorTableCell[][];
 }
 
 export interface IndicatorOutput {
@@ -159,10 +197,14 @@ export interface IndicatorOutput {
   labels: IndicatorLabel[];
   boxes: IndicatorBox[];
   bands: IndicatorBand[];
+  tables?: IndicatorTable[];
   footprints?: FootprintCandle[];
   deltaData?: DeltaPoint[];
   deltaSignals?: DeltaDirectionSignal[];
   cvdLines?: CVDLine[];
+  bankerData?: BankerFundFlowPoint[];
+  oscillatorHlines?: OscillatorHLine[];
+  oscillatorBands?: OscillatorBandZone[];
   backgroundColorZones: { start: number; end: number | null; color: string; label?: string }[];
   currentEntryPrice?: number | null;
   params?: Record<string, any>;
@@ -413,6 +455,7 @@ export function runPineEngine(
     labels: [],
     boxes: [],
     bands: [],
+    tables: [],
     backgroundColorZones: [],
     params: params
   };
@@ -3354,7 +3397,1868 @@ export function runPineEngine(
   }
 
   // ==========================================
-  // 13. PARSE STANDARD PINE SCRIPT (SMA, HMA, etc.)
+  // 13. MONEY ALGORITHM
+  // ==========================================
+  if (
+    idLower.includes('money_algorithm') ||
+    idLower.includes('money algorithm') ||
+    idLower.includes('moneyhacks') ||
+    (indicator.code && indicator.code.includes('MONEY ALGORITHM'))
+  ) {
+    const showSignals = params.showSignals !== undefined ? Boolean(params.showSignals) : true;
+    const sensitivity = Number(params.sensitivity ?? 2.4);
+    const STuner = Math.max(1, Math.min(25, Math.round(Number(params.STuner ?? 15))));
+    const Presets = String(params.Presets || 'All Signals');
+    const TextStyle = String(params.TextStyle || 'Minimal');
+    const consSignalsFilter = Boolean(params.consSignalsFilter);
+    const StrongSignalsOnly = Boolean(params.StrongSignalsOnly);
+    const highVolSignals = Boolean(params.highVolSignals);
+    const ContrarianOnly = Boolean(params.ContrarianOnly);
+
+    const Show_PR = params.Show_PR !== undefined ? Boolean(params.Show_PR) : true;
+    const MSTuner = Math.max(2, Math.min(30, Math.round(Number(params.MSTuner ?? 5))));
+
+    const LongTrendAverage = params.LongTrendAverage !== undefined ? Boolean(params.LongTrendAverage) : true;
+    const LTAsensitivity = Math.max(10, Math.min(500, Math.round(Number(params.LTAsensitivity ?? 250))));
+
+    const showTrendCloud = params.showTrendCloud !== undefined ? Boolean(params.showTrendCloud) : true;
+    const periodTrendCloud = String(params.periodTrendCloud || 'Smooth');
+
+    const showDashboard = params.showDashboard !== undefined ? Boolean(params.showDashboard) : true;
+    const locationDashboard = String(params.locationDashboard || 'Bottom Right');
+    const sizeDashboard = String(params.sizeDashboard || 'Small');
+
+    const tpLabels = params.tpLabels !== undefined ? Boolean(params.tpLabels) : true;
+    const ShowTpSlAreas = Boolean(params.ShowTpSlAreas);
+    const ShowTrailingSL = Boolean(params.ShowTrailingSL);
+
+    const useTP1 = params.useTP1 !== undefined ? Boolean(params.useTP1) : true;
+    const multTP1 = Number(params.multTP1 ?? 1.0);
+    const useTP2 = params.useTP2 !== undefined ? Boolean(params.useTP2) : true;
+    const multTP2 = Number(params.multTP2 ?? 2.0);
+    const useTP3 = params.useTP3 !== undefined ? Boolean(params.useTP3) : true;
+    const multTP3 = Number(params.multTP3 ?? 3.0);
+
+    const ShowSwings = Boolean(params.ShowSwings);
+    const periodSwings = Math.max(2, Math.round(Number(params.periodSwings ?? 10)));
+
+    const bullcolor = String(params.bullcolor || '#16e045');
+    const bearcolor = String(params.bearcolor || '#e1320f');
+
+    // 1. Trend Tracer (EMA 250 with 8-bar offset trend color)
+    if (LongTrendAverage && candles.length >= 15) {
+      const ltaLen = Math.min(candles.length - 2, LTAsensitivity);
+      const ltaEma = TA.ema(closePrices, ltaLen);
+      const tracerSeries: IndicatorSeries[] = [];
+      for (let i = 0; i < candles.length; i++) {
+        const val = ltaEma[i];
+        if (val !== null && !isNaN(val)) {
+          const refClose = closePrices[Math.max(0, i - 8)];
+          const isBull = refClose > val;
+          tracerSeries.push({
+            time: times[i],
+            value: val,
+            color: isBull ? bullcolor : bearcolor,
+            label: `Trend Tracer (${ltaLen})`
+          });
+        }
+      }
+      if (tracerSeries.length > 0) {
+        output.plots.push(tracerSeries);
+      }
+    }
+
+    // 2. Dynamic Trend Cloud
+    if (showTrendCloud && candles.length >= 20) {
+      if (periodTrendCloud === 'Smooth') {
+        const len1 = Math.min(candles.length - 2, 150);
+        const len2 = Math.min(candles.length - 2, 250);
+        const ema150 = TA.ema(closePrices, len1);
+        const ema250 = TA.ema(closePrices, len2);
+        const s1: IndicatorSeries[] = [];
+        const s2: IndicatorSeries[] = [];
+        for (let i = 0; i < candles.length; i++) {
+          const v1 = ema150[i];
+          const v2 = ema250[i];
+          if (v1 !== null && v2 !== null) {
+            const isBull = v1 >= v2;
+            s1.push({ time: times[i], value: v1, color: isBull ? 'rgba(22, 224, 69, 0.6)' : 'rgba(225, 50, 15, 0.6)', label: 'Cloud Fast (150)' });
+            s2.push({ time: times[i], value: v2, color: isBull ? 'rgba(22, 224, 69, 0.3)' : 'rgba(225, 50, 15, 0.3)', label: 'Cloud Slow (250)' });
+          }
+        }
+        if (s1.length > 0 && s2.length > 0) {
+          const idx1 = output.plots.length;
+          output.plots.push(s1);
+          const idx2 = output.plots.length;
+          output.plots.push(s2);
+          output.bands.push({
+            upperIndex: idx1,
+            lowerIndex: idx2,
+            color: 'rgba(22, 224, 69, 0.12)'
+          });
+        }
+      } else if (periodTrendCloud === 'Scalping+') {
+        const hma55 = TA.hma(closePrices, Math.min(candles.length - 2, 55));
+        const sHma: IndicatorSeries[] = [];
+        for (let i = 0; i < candles.length; i++) {
+          const v = hma55[i];
+          if (v !== null) {
+            const prev = hma55[Math.max(0, i - 2)] ?? v;
+            sHma.push({ time: times[i], value: v, color: v >= prev ? bullcolor : bearcolor, label: 'Cloud HMA (55)' });
+          }
+        }
+        if (sHma.length > 0) output.plots.push(sHma);
+      } else {
+        // Scalping or Swing Supertrend cloud
+        const mult = periodTrendCloud === 'Swing' ? 7 : 4;
+        const ohlc4 = candles.map(c => (c.open + c.high + c.low + c.close) / 4);
+        const atr10 = TA.atr(highPrices, lowPrices, closePrices, 10);
+        const stCloud: IndicatorSeries[] = [];
+        let curDir = 1;
+        let curUpper = 0;
+        let curLower = 0;
+        for (let i = 0; i < candles.length; i++) {
+          const a = atr10[i] || (highPrices[i] - lowPrices[i]);
+          const up = ohlc4[i] + mult * a;
+          const dn = ohlc4[i] - mult * a;
+          if (i === 0) {
+            curUpper = up;
+            curLower = dn;
+            curDir = 1;
+          } else {
+            const pClose = ohlc4[i - 1];
+            curLower = (dn > curLower || pClose < curLower) ? dn : curLower;
+            curUpper = (up < curUpper || pClose > curUpper) ? up : curUpper;
+            if (curDir === 1) {
+              if (ohlc4[i] < curLower) curDir = -1;
+            } else {
+              if (ohlc4[i] > curUpper) curDir = 1;
+            }
+          }
+          const stVal = curDir === 1 ? curLower : curUpper;
+          stCloud.push({
+            time: times[i],
+            value: stVal,
+            color: curDir === 1 ? 'rgba(22, 224, 69, 0.4)' : 'rgba(225, 50, 15, 0.4)',
+            label: `Trend Cloud (${periodTrendCloud})`
+          });
+        }
+        if (stCloud.length > 0) output.plots.push(stCloud);
+      }
+    }
+
+    // 3. Supertrend Core Engine & Signals
+    const atrST = TA.atr(highPrices, lowPrices, closePrices, STuner);
+    const stValues: (number | null)[] = new Array(candles.length).fill(null);
+    const stDir: number[] = new Array(candles.length).fill(1);
+    let curUpper = 0;
+    let curLower = 0;
+    let curDir = 1;
+
+    for (let i = 0; i < candles.length; i++) {
+      const a = atrST[i] || (highPrices[i] - lowPrices[i]);
+      const up = closePrices[i] + sensitivity * a;
+      const dn = closePrices[i] - sensitivity * a;
+      if (i === 0) {
+        curUpper = up;
+        curLower = dn;
+        curDir = 1;
+      } else {
+        const pClose = closePrices[i - 1];
+        curLower = (dn > curLower || pClose < curLower) ? dn : curLower;
+        curUpper = (up < curUpper || pClose > curUpper) ? up : curUpper;
+        if (curDir === 1) {
+          if (closePrices[i] < curLower) curDir = -1;
+        } else {
+          if (closePrices[i] > curUpper) curDir = 1;
+        }
+      }
+      stDir[i] = curDir;
+      stValues[i] = curDir === 1 ? curLower : curUpper;
+    }
+
+    // Filters preparation
+    const ema200 = TA.ema(closePrices, Math.min(candles.length - 2, 200));
+    const ema150 = TA.ema(closePrices, Math.min(candles.length - 2, 150));
+    const ema250 = TA.ema(closePrices, Math.min(candles.length - 2, 250));
+    const hma55 = TA.hma(closePrices, Math.min(candles.length - 2, 55));
+    const rsi14 = TA.rsi(closePrices, 14);
+
+    // ADX calculation for trending filter (consSignalsFilter)
+    const trVals = TA.tr(highPrices, lowPrices, closePrices);
+    const plusDM: number[] = [0];
+    const minusDM: number[] = [0];
+    for (let i = 1; i < candles.length; i++) {
+      const upMove = highPrices[i] - highPrices[i - 1];
+      const downMove = lowPrices[i - 1] - lowPrices[i];
+      plusDM.push(upMove > downMove && upMove > 0 ? upMove : 0);
+      minusDM.push(downMove > upMove && downMove > 0 ? downMove : 0);
+    }
+    const smoothTR = TA.sma(trVals, 14);
+    const smoothPlusDM = TA.sma(plusDM, 14);
+    const smoothMinusDM = TA.sma(minusDM, 14);
+    const adxValues: (number | null)[] = [];
+    for (let i = 0; i < candles.length; i++) {
+      const str = smoothTR[i];
+      const sp = smoothPlusDM[i];
+      const sm = smoothMinusDM[i];
+      if (str && str > 0 && sp !== null && sm !== null) {
+        const plusDI = (sp / str) * 100;
+        const minusDI = (sm / str) * 100;
+        const dx = (Math.abs(plusDI - minusDI) / Math.max(1e-5, plusDI + minusDI)) * 100;
+        adxValues.push(dx);
+      } else {
+        adxValues.push(null);
+      }
+    }
+
+    // Volume filter: (ema(volume, 15) - ema(volume, 20)) > 0
+    const volEma15 = TA.ema(volumes, 15);
+    const volEma20 = TA.ema(volumes, 20);
+
+    let lastSignalIdx = -100;
+    let lastSignalType: 'BUY' | 'SELL' | null = null;
+    let lastSignalPrice = 0;
+    let lastSignalAtr = 0;
+
+    if (showSignals) {
+      const startIdx = Math.max(STuner + 2, 20);
+      for (let i = startIdx; i < candles.length; i++) {
+        const prevDir = stDir[i - 1];
+        const curD = stDir[i];
+        const bullCross = prevDir === -1 && curD === 1;
+        const bearCross = prevDir === 1 && curD === -1;
+
+        if (!bullCross && !bearCross) continue;
+
+        // Confirmation for Strong+
+        let isStrongBull = true;
+        let isStrongBear = true;
+        if (ema200[i] !== null) {
+          isStrongBull = closePrices[i] > ema200[i]!;
+          isStrongBear = closePrices[i] < ema200[i]!;
+        }
+
+        if (Presets === 'Strong+') {
+          const e150 = ema150[i];
+          const e250 = ema250[i];
+          const h = hma55[i];
+          const hPrev = hma55[Math.max(0, i - 2)];
+          if (bullCross && (e150 === null || e250 === null || e150 <= e250 || h === null || hPrev === null || h <= hPrev)) {
+            continue;
+          }
+          if (bearCross && (e150 === null || e250 === null || e150 >= e250 || h === null || hPrev === null || h >= hPrev)) {
+            continue;
+          }
+        }
+
+        // Apply filters
+        if (StrongSignalsOnly) {
+          if (bullCross && !isStrongBull) continue;
+          if (bearCross && !isStrongBear) continue;
+        }
+        if (consSignalsFilter) {
+          const adx = adxValues[i];
+          if (adx === null || adx < 20) continue;
+        }
+        if (highVolSignals) {
+          const v15 = volEma15[i];
+          const v20 = volEma20[i];
+          if (v15 === null || v20 === null || v15 <= v20) continue;
+        }
+        if (ContrarianOnly) {
+          const rsi = rsi14[i];
+          if (bullCross && (rsi === null || rsi > 40)) continue;
+          if (bearCross && (rsi === null || rsi < 60)) continue;
+        }
+
+        // Minimum spacing
+        if (i - lastSignalIdx < 3) continue;
+
+        lastSignalIdx = i;
+        const curAtr = atrST[i] || (highPrices[i] - lowPrices[i]);
+        lastSignalAtr = curAtr;
+        lastSignalPrice = closePrices[i];
+
+        if (bullCross) {
+          lastSignalType = 'BUY';
+          const badgeText = TextStyle === 'Minimal' ? (isStrongBull ? '▲+' : '▲') : (isStrongBull ? 'Strong Buy' : 'Buy');
+          output.signals.push({
+            time: times[i],
+            type: 'BUY',
+            price: lowPrices[i],
+            comment: badgeText
+          });
+          output.labels.push({
+            id: `lbl-buy-${i}`,
+            x: times[i],
+            y: lowPrices[i] - curAtr * 0.45,
+            text: badgeText,
+            color: bullcolor,
+            textcolor: '#000000',
+            badge: true
+          });
+        } else if (bearCross) {
+          lastSignalType = 'SELL';
+          const badgeText = TextStyle === 'Minimal' ? (isStrongBear ? '▼+' : '▼') : (isStrongBear ? 'Strong Sell' : 'Sell');
+          output.signals.push({
+            time: times[i],
+            type: 'SELL',
+            price: highPrices[i],
+            comment: badgeText
+          });
+          output.labels.push({
+            id: `lbl-sell-${i}`,
+            x: times[i],
+            y: highPrices[i] + curAtr * 0.45,
+            text: badgeText,
+            color: bearcolor,
+            textcolor: '#ffffff',
+            badge: true
+          });
+        }
+      }
+    }
+
+    // 4. WaveTrend PullBack Signals (Show_PR)
+    if (Show_PR && candles.length >= 30) {
+      const chlLen = Math.max(5, 5 * MSTuner);
+      const avgLen = Math.max(10, 10 * MSTuner);
+      const esa = TA.ema(closePrices, Math.min(candles.length - 2, chlLen));
+      const diffAbs = closePrices.map((c, i) => (esa[i] !== null ? Math.abs(c - esa[i]!) : null));
+      const d = TA.ema(diffAbs, Math.min(candles.length - 2, chlLen));
+      const ci = closePrices.map((c, i) => {
+        const e = esa[i];
+        const dv = d[i];
+        if (e !== null && dv !== null && dv > 0) {
+          return (c - e) / (0.015 * dv);
+        }
+        return null;
+      });
+      const wt1 = TA.ema(ci, Math.min(candles.length - 2, avgLen));
+      const wt2 = TA.sma(wt1, 3);
+
+      const pbStart = Math.max(chlLen + avgLen + 2, 25);
+      let lastPbIdx = -100;
+      for (let i = pbStart; i < candles.length; i++) {
+        const w1Prev = wt1[i - 1];
+        const w1Cur = wt1[i];
+        const w2Prev = wt2[i - 1];
+        const w2Cur = wt2[i];
+
+        if (w1Prev === null || w1Cur === null || w2Prev === null || w2Cur === null) continue;
+
+        const wtBullCross = w1Prev <= w2Prev && w1Cur > w2Cur;
+        const wtBearCross = w1Prev >= w2Prev && w1Cur < w2Cur;
+
+        if (i - lastPbIdx >= 4) {
+          const curAtr = atrST[i] || (highPrices[i] - lowPrices[i]);
+          if (wtBullCross && w2Cur <= -60) {
+            lastPbIdx = i;
+            output.labels.push({
+              id: `pb-buy-${i}`,
+              x: times[i],
+              y: lowPrices[i] - curAtr * 0.28,
+              text: '● PB',
+              color: bullcolor,
+              textcolor: '#ffffff',
+              badge: true
+            });
+          } else if (wtBearCross && w2Cur >= 60) {
+            lastPbIdx = i;
+            output.labels.push({
+              id: `pb-sell-${i}`,
+              x: times[i],
+              y: highPrices[i] + curAtr * 0.28,
+              text: '● PB',
+              color: bearcolor,
+              textcolor: '#ffffff',
+              badge: true
+            });
+          }
+        }
+      }
+    }
+
+    // 5. Dynamic Take Profit Labels (RSI based)
+    if (tpLabels && candles.length >= 25 && lastSignalIdx > 0) {
+      let lastTpHit = 0;
+      for (let i = lastSignalIdx + 1; i < candles.length; i++) {
+        const rsiPrev = rsi14[i - 1];
+        const rsiCur = rsi14[i];
+        if (rsiPrev === null || rsiCur === null) continue;
+
+        const curAtr = atrST[i] || (highPrices[i] - lowPrices[i]);
+        if (lastSignalType === 'BUY') {
+          if (rsiPrev < 70 && rsiCur >= 70 && lastTpHit < 1) {
+            lastTpHit = 1;
+            output.labels.push({ id: `tp1-${i}`, x: times[i], y: highPrices[i] + curAtr * 0.25, text: 'TP 1', color: bullcolor, textcolor: '#000000', badge: true });
+          } else if (rsiPrev < 75 && rsiCur >= 75 && lastTpHit < 2) {
+            lastTpHit = 2;
+            output.labels.push({ id: `tp2-${i}`, x: times[i], y: highPrices[i] + curAtr * 0.25, text: 'TP 2', color: bullcolor, textcolor: '#000000', badge: true });
+          } else if (rsiPrev < 80 && rsiCur >= 80 && lastTpHit < 3) {
+            lastTpHit = 3;
+            output.labels.push({ id: `tp3-${i}`, x: times[i], y: highPrices[i] + curAtr * 0.25, text: 'TP 3', color: bullcolor, textcolor: '#000000', badge: true });
+          }
+        } else if (lastSignalType === 'SELL') {
+          if (rsiPrev > 30 && rsiCur <= 30 && lastTpHit < 1) {
+            lastTpHit = 1;
+            output.labels.push({ id: `tp1-${i}`, x: times[i], y: lowPrices[i] - curAtr * 0.25, text: 'TP 1', color: bearcolor, textcolor: '#ffffff', badge: true });
+          } else if (rsiPrev > 25 && rsiCur <= 25 && lastTpHit < 2) {
+            lastTpHit = 2;
+            output.labels.push({ id: `tp2-${i}`, x: times[i], y: lowPrices[i] - curAtr * 0.25, text: 'TP 2', color: bearcolor, textcolor: '#ffffff', badge: true });
+          } else if (rsiPrev > 20 && rsiCur <= 20 && lastTpHit < 3) {
+            lastTpHit = 3;
+            output.labels.push({ id: `tp3-${i}`, x: times[i], y: lowPrices[i] - curAtr * 0.25, text: 'TP 3', color: bearcolor, textcolor: '#ffffff', badge: true });
+          }
+        }
+      }
+    }
+
+    // 6. Risk Management Areas (ShowTpSlAreas)
+    if (ShowTpSlAreas && lastSignalPrice > 0 && lastSignalAtr > 0 && lastSignalType) {
+      const isBuy = lastSignalType === 'BUY';
+      const stopDist = lastSignalAtr * 1.5;
+      const stopPrice = isBuy ? lastSignalPrice - stopDist : lastSignalPrice + stopDist;
+      const tp1Price = isBuy ? lastSignalPrice + stopDist * multTP1 : lastSignalPrice - stopDist * multTP1;
+      const tp2Price = isBuy ? lastSignalPrice + stopDist * multTP2 : lastSignalPrice - stopDist * multTP2;
+      const tp3Price = isBuy ? lastSignalPrice + stopDist * multTP3 : lastSignalPrice - stopDist * multTP3;
+
+      const tStart = times[lastSignalIdx];
+      const tEnd = times[candles.length - 1];
+
+      // Entry line
+      output.lines.push({
+        id: 'entry-line',
+        x1: tStart,
+        y1: lastSignalPrice,
+        x2: tEnd,
+        y2: lastSignalPrice,
+        color: '#f59e0b',
+        width: 1.5,
+        style: 'dashed',
+        label: `Entry ${lastSignalPrice.toFixed(2)}`
+      });
+
+      // Stop Loss
+      output.lines.push({
+        id: 'sl-line',
+        x1: tStart,
+        y1: stopPrice,
+        x2: tEnd,
+        y2: stopPrice,
+        color: bearcolor,
+        width: 2,
+        style: 'solid',
+        label: `SL ${stopPrice.toFixed(2)}`
+      });
+
+      if (useTP1) {
+        output.lines.push({
+          id: 'tp1-line',
+          x1: tStart,
+          y1: tp1Price,
+          x2: tEnd,
+          y2: tp1Price,
+          color: bullcolor,
+          width: 1.5,
+          style: 'dotted',
+          label: `TP1 ${tp1Price.toFixed(2)}`
+        });
+      }
+      if (useTP2) {
+        output.lines.push({
+          id: 'tp2-line',
+          x1: tStart,
+          y1: tp2Price,
+          x2: tEnd,
+          y2: tp2Price,
+          color: bullcolor,
+          width: 1.5,
+          style: 'dotted',
+          label: `TP2 ${tp2Price.toFixed(2)}`
+        });
+      }
+      if (useTP3) {
+        output.lines.push({
+          id: 'tp3-line',
+          x1: tStart,
+          y1: tp3Price,
+          x2: tEnd,
+          y2: tp3Price,
+          color: bullcolor,
+          width: 1.5,
+          style: 'dotted',
+          label: `TP3 ${tp3Price.toFixed(2)}`
+        });
+      }
+    }
+
+    // 7. Trailing Stop Loss Line
+    if (ShowTrailingSL && candles.length >= 20) {
+      const trailSeries: IndicatorSeries[] = [];
+      let trailStop = closePrices[0];
+      for (let i = 0; i < candles.length; i++) {
+        const curAtr = atrST[i] || (highPrices[i] - lowPrices[i]);
+        const isUp = stDir[i] === 1;
+        if (isUp) {
+          trailStop = Math.max(trailStop, closePrices[i] - curAtr * 1.8);
+        } else {
+          trailStop = Math.min(trailStop, closePrices[i] + curAtr * 1.8);
+        }
+        trailSeries.push({
+          time: times[i],
+          value: trailStop,
+          color: isUp ? bullcolor : bearcolor,
+          label: 'Trailing SL'
+        });
+      }
+      if (trailSeries.length > 0) output.plots.push(trailSeries);
+    }
+
+    // 8. Market Structure Swings (ShowSwings)
+    if (ShowSwings && candles.length >= periodSwings * 2 + 1) {
+      const p = periodSwings;
+      let lastHighVal = 0;
+      let lastLowVal = Infinity;
+      for (let i = p; i < candles.length - p; i++) {
+        const h = highPrices[i];
+        const l = lowPrices[i];
+        let isPivotHigh = true;
+        let isPivotLow = true;
+        for (let j = 1; j <= p; j++) {
+          if (highPrices[i - j] >= h || highPrices[i + j] > h) isPivotHigh = false;
+          if (lowPrices[i - j] <= l || lowPrices[i + j] < l) isPivotLow = false;
+        }
+        if (isPivotHigh) {
+          const isHH = h > lastHighVal;
+          lastHighVal = h;
+          output.labels.push({
+            id: `sh-${i}`,
+            x: times[i],
+            y: h + (highPrices[i] - lowPrices[i]) * 0.2,
+            text: isHH ? 'HH' : 'LH',
+            color: '#3b82f6',
+            textcolor: '#ffffff',
+            badge: true
+          });
+        }
+        if (isPivotLow) {
+          const isLL = l < lastLowVal;
+          lastLowVal = l;
+          output.labels.push({
+            id: `sl-${i}`,
+            x: times[i],
+            y: l - (highPrices[i] - lowPrices[i]) * 0.2,
+            text: isLL ? 'LL' : 'HL',
+            color: '#f59e0b',
+            textcolor: '#ffffff',
+            badge: true
+          });
+        }
+      }
+    }
+
+    // 9. Smart Panel Dashboard
+    if (showDashboard && candles.length >= 10) {
+      const lastClose = closePrices[candles.length - 1];
+      const lastIdx = candles.length - 1;
+
+      // Multi-timeframe trend calculations (simulated using multiple period EMAs)
+      const m5Bull = lastClose >= (TA.ema(closePrices, Math.min(lastIdx, 20))[lastIdx] || lastClose);
+      const m15Bull = lastClose >= (TA.ema(closePrices, Math.min(lastIdx, 50))[lastIdx] || lastClose);
+      const m30Bull = lastClose >= (TA.ema(closePrices, Math.min(lastIdx, 100))[lastIdx] || lastClose);
+      const h1Bull = lastClose >= (TA.ema(closePrices, Math.min(lastIdx, 150))[lastIdx] || lastClose);
+      const h4Bull = lastClose >= (TA.ema(closePrices, Math.min(lastIdx, 200))[lastIdx] || lastClose);
+
+      // Market State: Trending vs Ranging using ADX / DMI
+      const lastAdx = adxValues[lastIdx] ?? 22;
+      const trendText = lastAdx > 25 ? 'Trending' : lastAdx < 18 ? 'No trend' : 'Ranging';
+
+      // Volatility %
+      const lastAtr = atrST[lastIdx] || (highPrices[lastIdx] - lowPrices[lastIdx]);
+      const calcDev = (lastAtr / Math.max(1e-5, lastClose)) * 100;
+      const volatilityPct = Math.min(99.9, Math.max(1.0, 40 * calcDev + 28));
+
+      // Institutional Activity (Volume surge check)
+      const lastVol = volumes[lastIdx] || 1000;
+      const avgVol = volEma20[lastIdx] || 1000;
+      const instActivity = lastVol >= avgVol * 1.08 ? 'Active' : 'Inactive';
+
+      // Current Session (UTC)
+      const nowUtcHours = new Date().getUTCHours();
+      let sessionText = 'London';
+      const isSydney = nowUtcHours >= 21 || nowUtcHours < 6;
+      const isTokyo = nowUtcHours >= 0 && nowUtcHours < 9;
+      const isLondon = nowUtcHours >= 7 && nowUtcHours < 16;
+      const isNewYork = nowUtcHours >= 13 && nowUtcHours < 22;
+
+      if (isLondon && isNewYork) sessionText = 'London/New York';
+      else if (isTokyo && isLondon) sessionText = 'Tokyo/London';
+      else if (isSydney && isTokyo) sessionText = 'Sydney/Tokyo';
+      else if (isNewYork) sessionText = 'New York';
+      else if (isLondon) sessionText = 'London';
+      else if (isTokyo) sessionText = 'Tokyo';
+      else if (isSydney) sessionText = 'Sydney';
+
+      // Trend Pressure
+      const ema9 = TA.ema(closePrices, Math.min(lastIdx, 9));
+      const curEma9 = ema9[lastIdx] || lastClose;
+      const prevEma9 = ema9[Math.max(0, lastIdx - 2)] || curEma9;
+      const trendPressure = curEma9 > prevEma9 ? 'Bullish' : curEma9 < prevEma9 ? 'Bearish' : 'Flat';
+
+      // Map position string
+      let posKey: any = 'bottom_right';
+      const locLower = locationDashboard.toLowerCase();
+      if (locLower.includes('top') && locLower.includes('right')) posKey = 'top_right';
+      else if (locLower.includes('top') && locLower.includes('left')) posKey = 'top_left';
+      else if (locLower.includes('bottom') && locLower.includes('left')) posKey = 'bottom_left';
+      else if (locLower.includes('top') && locLower.includes('center')) posKey = 'top_center';
+      else if (locLower.includes('bottom') && locLower.includes('center')) posKey = 'bottom_center';
+      else if (locLower.includes('middle') && locLower.includes('right')) posKey = 'middle_right';
+      else if (locLower.includes('middle') && locLower.includes('center')) posKey = 'middle_center';
+
+      output.tables = [
+        {
+          id: 'money_algorithm_panel',
+          title: 'MONEY ALGORITHM STRATEGY',
+          position: posKey,
+          size: (sizeDashboard.toLowerCase() as any) || 'small',
+          rows: [
+            [
+              { text: 'MTF', bold: true, align: 'center', color: '#94a3b8' },
+              { text: 'MONEY ALGORITHM STRATEGY', bold: true, align: 'left', color: '#38bdf8' },
+              { text: '', align: 'right' }
+            ],
+            [
+              { text: 'M5', bold: true, align: 'center', bgColor: m5Bull ? '#16e045' : '#e1320f', color: '#ffffff' },
+              { text: '🔥 Market State', align: 'left', color: '#cbd5e1' },
+              { text: trendText, bold: true, align: 'right', color: trendText === 'Trending' ? '#16e045' : '#f59e0b' }
+            ],
+            [
+              { text: 'M15', bold: true, align: 'center', bgColor: m15Bull ? '#16e045' : '#e1320f', color: '#ffffff' },
+              { text: '⚠️ Volatility', align: 'left', color: '#cbd5e1' },
+              { text: `${volatilityPct.toFixed(1)}%`, bold: true, align: 'right', color: '#38bdf8' }
+            ],
+            [
+              { text: 'M30', bold: true, align: 'center', bgColor: m30Bull ? '#16e045' : '#e1320f', color: '#ffffff' },
+              { text: '🏦 Institutional Activity', align: 'left', color: '#cbd5e1' },
+              { text: instActivity, bold: true, align: 'right', color: instActivity === 'Active' ? '#16e045' : '#94a3b8' }
+            ],
+            [
+              { text: '1H', bold: true, align: 'center', bgColor: h1Bull ? '#16e045' : '#e1320f', color: '#ffffff' },
+              { text: '🕒 Current Session (UTC)', align: 'left', color: '#cbd5e1' },
+              { text: sessionText, bold: true, align: 'right', color: '#fbbf24' }
+            ],
+            [
+              { text: '4H', bold: true, align: 'center', bgColor: h4Bull ? '#16e045' : '#e1320f', color: '#ffffff' },
+              { text: '🌊 Trend Pressure', align: 'left', color: '#cbd5e1' },
+              { text: trendPressure, bold: true, align: 'right', color: trendPressure === 'Bullish' ? '#16e045' : (trendPressure === 'Bearish' ? '#e1320f' : '#94a3b8') }
+            ]
+          ]
+        }
+      ];
+    }
+
+    return output;
+  }
+
+  // ==========================================
+  // 14. LINEAR REGRESSION CANDLES WITH OB AND TARGET
+  // ==========================================
+  if (
+    idLower.includes('linreg_candles') ||
+    idLower.includes('linear regression candles') ||
+    idLower.includes('lin reg candles') ||
+    (idLower.includes('linear') && idLower.includes('target') && idLower.includes('ob')) ||
+    (indicator.code && indicator.code.includes('Linear Regression Candles with OB and Target'))
+  ) {
+    const isDark = (params.colors || 'BRIGHT') === 'DARK';
+    const bullCol = isDark ? '#ffffff' : '#26a69a';
+    const bearCol = isDark ? '#2962ff' : '#ef5350';
+
+    const periods = Math.max(1, Math.min(20, Math.round(Number(params.periods ?? 5))));
+    const threshold = Math.max(0, Number(params.threshold ?? 0.0));
+    const useWicks = Boolean(params.usewicks);
+    const showBull = params.showbull !== undefined ? Boolean(params.showbull) : true;
+    const showBear = params.showbear !== undefined ? Boolean(params.showbear) : true;
+    const infoPan = Boolean(params.info_pan);
+
+    const linRegEnabled = params.lin_reg !== undefined ? Boolean(params.lin_reg) : true;
+    const linregLength = Math.max(2, Math.min(200, Math.round(Number(params.linreg_length ?? 11))));
+    const signalLength = Math.max(1, Math.min(200, Math.round(Number(params.signal_length ?? 7))));
+    const smaSignal = params.sma_signal !== undefined ? Boolean(params.sma_signal) : true;
+
+    const showHull = params.show_hull !== undefined ? Boolean(params.show_hull) : true;
+    const hullLength = Math.max(5, Math.min(300, Math.round(Number(params.hull_length ?? 55))));
+    const hullMode = String(params.hull_mode || 'Hma');
+
+    const showABCD = params.show_abcd !== undefined ? Boolean(params.show_abcd) : true;
+    const abcdLen = Math.max(2, Math.min(20, Math.round(Number(params.abcd_len ?? 5))));
+
+    const showTargets = params.show_targets !== undefined ? Boolean(params.show_targets) : true;
+    const distTarget1 = Number(params.distTarget1 ?? 3.0);
+    const distTarget2 = Number(params.distTarget2 ?? 3.0);
+
+    const showMsbOb = params.show_msb_ob !== undefined ? Boolean(params.show_msb_ob) : true;
+    const zigzagLen = Math.max(3, Math.min(50, Math.round(Number(params.zigzag_len ?? 9))));
+    const fibFactor = 0.273;
+
+    const showTrendlines = params.show_trendlines !== undefined ? Boolean(params.show_trendlines) : true;
+    const showGann = params.show_gann !== undefined ? Boolean(params.show_gann) : true;
+    const showSupplyDemand = params.show_supply_demand !== undefined ? Boolean(params.show_supply_demand) : true;
+
+    // --- 1. Linear Regression Calculation ---
+    const calcLinReg = (arr: number[], len: number, idx: number): number => {
+      if (idx < len - 1) return arr[idx];
+      let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+      for (let k = 0; k < len; k++) {
+        const x = k + 1;
+        const y = arr[idx - len + 1 + k];
+        sumX += x;
+        sumY += y;
+        sumXY += x * y;
+        sumX2 += x * x;
+      }
+      const denom = len * sumX2 - sumX * sumX;
+      if (denom === 0) return arr[idx];
+      const slope = (len * sumXY - sumX * sumY) / denom;
+      const intercept = (sumY - slope * sumX) / len;
+      return intercept + slope * len;
+    };
+
+    const bClose: number[] = [];
+    const bOpen: number[] = [];
+    for (let i = 0; i < candles.length; i++) {
+      if (linRegEnabled) {
+        bClose.push(calcLinReg(closePrices, linregLength, i));
+        bOpen.push(calcLinReg(openPrices, linregLength, i));
+      } else {
+        bClose.push(closePrices[i]);
+        bOpen.push(openPrices[i]);
+      }
+    }
+
+    // Signal Line calculation (SMA or EMA of bClose)
+    const signalVals = smaSignal ? TA.sma(bClose, signalLength) : TA.ema(bClose, signalLength);
+    const signalSeries: IndicatorSeries[] = [];
+    for (let i = 0; i < candles.length; i++) {
+      const v = signalVals[i];
+      if (v !== null && !isNaN(v)) {
+        signalSeries.push({
+          time: times[i],
+          value: v,
+          color: '#2962ff',
+          label: 'LinReg Signal'
+        });
+      }
+    }
+    output.plots.push(signalSeries);
+
+    // --- 2. Hull Suite Trend Ribbon ---
+    if (showHull && candles.length >= 10) {
+      let hullSeriesArr: (number | null)[];
+      if (hullMode === 'Ehma') {
+        const emaHalf = TA.ema(closePrices, Math.max(1, Math.round(hullLength / 2)));
+        const emaFull = TA.ema(closePrices, hullLength);
+        const diff = closePrices.map((_, idx) => {
+          const h = emaHalf[idx];
+          const f = emaFull[idx];
+          return (h !== null && f !== null) ? 2 * h - f : null;
+        });
+        hullSeriesArr = TA.ema(diff, Math.max(1, Math.round(Math.sqrt(hullLength))));
+      } else if (hullMode === 'Thma') {
+        const wmaThird = TA.wma(closePrices, Math.max(1, Math.round(hullLength / 3)));
+        const wmaHalf = TA.wma(closePrices, Math.max(1, Math.round(hullLength / 2)));
+        const wmaFull = TA.wma(closePrices, hullLength);
+        const diff = closePrices.map((_, idx) => {
+          const t = wmaThird[idx];
+          const h = wmaHalf[idx];
+          const f = wmaFull[idx];
+          return (t !== null && h !== null && f !== null) ? 3 * t - h - f : null;
+        });
+        hullSeriesArr = TA.wma(diff, hullLength);
+      } else {
+        hullSeriesArr = TA.hma(closePrices, hullLength);
+      }
+
+      const mHullSeries: IndicatorSeries[] = [];
+      const sHullSeries: IndicatorSeries[] = [];
+
+      for (let i = 0; i < candles.length; i++) {
+        const mVal = hullSeriesArr[i];
+        const sVal = i >= 2 ? hullSeriesArr[i - 2] : mVal;
+
+        if (mVal !== null && sVal !== null && !isNaN(mVal) && !isNaN(sVal)) {
+          const isUp = mVal >= sVal;
+          const col = isUp ? 'rgba(0, 230, 118, 0.75)' : 'rgba(255, 23, 68, 0.75)';
+
+          mHullSeries.push({
+            time: times[i],
+            value: mVal,
+            color: col,
+            label: 'MHULL'
+          });
+
+          sHullSeries.push({
+            time: times[i],
+            value: sVal,
+            color: col,
+            label: 'SHULL'
+          });
+        }
+      }
+
+      const mIdx = output.plots.length;
+      output.plots.push(mHullSeries);
+      const sIdx = output.plots.length;
+      output.plots.push(sHullSeries);
+
+      // Create flowing ribbon band
+      output.bands.push({
+        upperIndex: mIdx,
+        lowerIndex: sIdx,
+        color: 'rgba(0, 230, 118, 0.25)'
+      });
+    }
+
+    // --- 3. Order Block (OB) Identification & Channel Levels ---
+    const obPeriod = periods + 1;
+    let latestBullHigh = 0;
+    let latestBullAvg = 0;
+    let latestBullLow = 0;
+    let latestBearHigh = 0;
+    let latestBearAvg = 0;
+    let latestBearLow = 0;
+
+    for (let i = obPeriod; i < candles.length; i++) {
+      const obIdx = i - obPeriod;
+      const obClose = closePrices[obIdx];
+      const obOpen = openPrices[obIdx];
+      const obHigh = highPrices[obIdx];
+      const obLow = lowPrices[obIdx];
+
+      const absMove = (Math.abs(obClose - closePrices[i - 1]) / obClose) * 100;
+      const relMove = absMove >= threshold;
+
+      // Bullish OB: Red candle followed by N consecutive Green candles
+      const isBullishOBCandle = obClose < obOpen;
+      let upCandlesCount = 0;
+      for (let k = 1; k <= periods; k++) {
+        if (closePrices[i - k] > openPrices[i - k]) {
+          upCandlesCount++;
+        }
+      }
+
+      if (isBullishOBCandle && upCandlesCount === periods && relMove && showBull) {
+        const highLimit = useWicks ? obHigh : obOpen;
+        const lowLimit = obLow;
+        const avgLimit = (highLimit + lowLimit) / 2;
+
+        latestBullHigh = highLimit;
+        latestBullAvg = avgLimit;
+        latestBullLow = lowLimit;
+
+        const obTime = times[obIdx];
+        const rightEdgeTime = times[Math.min(times.length - 1, i + 16)];
+
+        // Signal & Marker
+        output.signals.push({
+          time: obTime,
+          type: 'BUY',
+          price: lowLimit,
+          comment: 'Bullish OB'
+        });
+
+        output.labels.push({
+          id: `lbl-bull-ob-${obTime}-${i}`,
+          x: obTime,
+          y: lowLimit - (highPrices[obIdx] - lowPrices[obIdx]) * 0.4,
+          text: 'Bullish OB',
+          color: 'rgba(38, 166, 154, 0.25)',
+          textcolor: bullCol,
+          badge: true
+        });
+
+        // Channel Box
+        output.boxes.push({
+          id: `box-bull-ob-${obTime}-${i}`,
+          x1: obTime,
+          y1: highLimit,
+          x2: rightEdgeTime,
+          y2: lowLimit,
+          color: toRgba(bullCol, 0.18, 'rgba(38, 166, 154, 0.18)'),
+          bordercolor: bullCol,
+          borderstyle: 'dashed',
+          label: 'Bullish OB'
+        });
+
+        // Center Average Line
+        output.lines.push({
+          id: `line-bull-ob-avg-${obTime}-${i}`,
+          x1: obTime,
+          y1: avgLimit,
+          x2: rightEdgeTime,
+          y2: avgLimit,
+          color: bullCol,
+          width: 1,
+          style: 'solid',
+          label: 'OB Avg'
+        });
+      }
+
+      // Bearish OB: Green candle followed by N consecutive Red candles
+      const isBearishOBCandle = obClose > obOpen;
+      let downCandlesCount = 0;
+      for (let k = 1; k <= periods; k++) {
+        if (closePrices[i - k] < openPrices[i - k]) {
+          downCandlesCount++;
+        }
+      }
+
+      if (isBearishOBCandle && downCandlesCount === periods && relMove && showBear) {
+        const highLimit = obHigh;
+        const lowLimit = useWicks ? obLow : obOpen;
+        const avgLimit = (highLimit + lowLimit) / 2;
+
+        latestBearHigh = highLimit;
+        latestBearAvg = avgLimit;
+        latestBearLow = lowLimit;
+
+        const obTime = times[obIdx];
+        const rightEdgeTime = times[Math.min(times.length - 1, i + 16)];
+
+        // Signal & Marker
+        output.signals.push({
+          time: obTime,
+          type: 'SELL',
+          price: highLimit,
+          comment: 'Bearish OB'
+        });
+
+        output.labels.push({
+          id: `lbl-bear-ob-${obTime}-${i}`,
+          x: obTime,
+          y: highLimit + (highPrices[obIdx] - lowPrices[obIdx]) * 0.4,
+          text: 'Bearish OB',
+          color: 'rgba(239, 83, 80, 0.25)',
+          textcolor: bearCol,
+          badge: true
+        });
+
+        // Channel Box
+        output.boxes.push({
+          id: `box-bear-ob-${obTime}-${i}`,
+          x1: obTime,
+          y1: highLimit,
+          x2: rightEdgeTime,
+          y2: lowLimit,
+          color: toRgba(bearCol, 0.18, 'rgba(239, 83, 80, 0.18)'),
+          bordercolor: bearCol,
+          borderstyle: 'dashed',
+          label: 'Bearish OB'
+        });
+
+        // Center Average Line
+        output.lines.push({
+          id: `line-bear-ob-avg-${obTime}-${i}`,
+          x1: obTime,
+          y1: avgLimit,
+          x2: rightEdgeTime,
+          y2: avgLimit,
+          color: bearCol,
+          width: 1,
+          style: 'solid',
+          label: 'OB Avg'
+        });
+      }
+    }
+
+    // --- 4. Market Structure Break (MSB) & Breaker / Mitigation Blocks ---
+    if (showMsbOb && candles.length >= 20) {
+      interface SwingPoint {
+        idx: number;
+        val: number;
+        isHigh: boolean;
+        time: number;
+      }
+
+      const swings: SwingPoint[] = [];
+      const zHalf = Math.max(2, Math.floor(zigzagLen / 2));
+
+      for (let i = zHalf; i < candles.length - zHalf; i++) {
+        let isPivotHigh = true;
+        let isPivotLow = true;
+
+        for (let k = -zHalf; k <= zHalf; k++) {
+          if (k === 0) continue;
+          if (highPrices[i + k] >= highPrices[i]) isPivotHigh = false;
+          if (lowPrices[i + k] <= lowPrices[i]) isPivotLow = false;
+        }
+
+        if (isPivotHigh) {
+          swings.push({ idx: i, val: highPrices[i], isHigh: true, time: times[i] });
+        } else if (isPivotLow) {
+          swings.push({ idx: i, val: lowPrices[i], isHigh: false, time: times[i] });
+        }
+      }
+
+      // Check MSB and build Order / Breaker / Mitigation boxes
+      let lastMarketDir = 0;
+      for (let s = 2; s < swings.length; s++) {
+        const prev1 = swings[s - 1];
+        const prev2 = swings[s - 2];
+        const cur = swings[s];
+
+        // Bullish MSB: Break above previous Swing High
+        if (cur.isHigh && prev2.isHigh && cur.val > prev2.val + Math.abs(prev2.val - prev1.val) * fibFactor) {
+          if (lastMarketDir !== 1) {
+            lastMarketDir = 1;
+            const msbTime = times[cur.idx];
+            const msbPrice = prev2.val;
+
+            // MSB Line
+            output.lines.push({
+              id: `msb-line-bull-${msbTime}`,
+              x1: prev2.time,
+              y1: msbPrice,
+              x2: msbTime,
+              y2: msbPrice,
+              color: '#26a69a',
+              width: 1.5,
+              style: 'dashed',
+              label: 'MSB'
+            });
+
+            output.labels.push({
+              id: `msb-lbl-bull-${msbTime}`,
+              x: Math.round((prev2.time + msbTime) / 2),
+              y: msbPrice,
+              text: 'MSB',
+              color: 'rgba(38, 166, 154, 0.25)',
+              textcolor: '#26a69a',
+              badge: true
+            });
+
+            // Find origin OB candle in retracement leg
+            let buObIdx = prev1.idx;
+            for (let b = prev2.idx; b <= prev1.idx; b++) {
+              if (openPrices[b] > closePrices[b]) {
+                buObIdx = b;
+                break;
+              }
+            }
+
+            const boxEnd = times[Math.min(times.length - 1, cur.idx + 25)];
+            output.boxes.push({
+              id: `box-bu-ob-${times[buObIdx]}`,
+              x1: times[buObIdx],
+              y1: highPrices[buObIdx],
+              x2: boxEnd,
+              y2: lowPrices[buObIdx],
+              color: 'rgba(38, 166, 154, 0.2)',
+              bordercolor: '#26a69a',
+              label: 'Bu-OB',
+              borderstyle: 'solid'
+            });
+
+            // Breaker / Mitigation Box
+            output.boxes.push({
+              id: `box-bu-bb-${times[prev1.idx]}`,
+              x1: prev1.time,
+              y1: highPrices[prev1.idx],
+              x2: boxEnd,
+              y2: lowPrices[prev1.idx],
+              color: 'rgba(38, 166, 154, 0.12)',
+              bordercolor: '#26a69a',
+              label: prev1.val < (swings[s - 3]?.val || 0) ? 'Bu-BB' : 'Bu-MB',
+              borderstyle: 'dotted'
+            });
+          }
+        }
+        // Bearish MSB: Break below previous Swing Low
+        else if (!cur.isHigh && !prev2.isHigh && cur.val < prev2.val - Math.abs(prev1.val - prev2.val) * fibFactor) {
+          if (lastMarketDir !== -1) {
+            lastMarketDir = -1;
+            const msbTime = times[cur.idx];
+            const msbPrice = prev2.val;
+
+            // MSB Line
+            output.lines.push({
+              id: `msb-line-bear-${msbTime}`,
+              x1: prev2.time,
+              y1: msbPrice,
+              x2: msbTime,
+              y2: msbPrice,
+              color: '#ef5350',
+              width: 1.5,
+              style: 'dashed',
+              label: 'MSB'
+            });
+
+            output.labels.push({
+              id: `msb-lbl-bear-${msbTime}`,
+              x: Math.round((prev2.time + msbTime) / 2),
+              y: msbPrice,
+              text: 'MSB',
+              color: 'rgba(239, 83, 80, 0.25)',
+              textcolor: '#ef5350',
+              badge: true
+            });
+
+            // Find origin OB candle in pull leg
+            let beObIdx = prev1.idx;
+            for (let b = prev2.idx; b <= prev1.idx; b++) {
+              if (openPrices[b] < closePrices[b]) {
+                beObIdx = b;
+                break;
+              }
+            }
+
+            const boxEnd = times[Math.min(times.length - 1, cur.idx + 25)];
+            output.boxes.push({
+              id: `box-be-ob-${times[beObIdx]}`,
+              x1: times[beObIdx],
+              y1: highPrices[beObIdx],
+              x2: boxEnd,
+              y2: lowPrices[beObIdx],
+              color: 'rgba(239, 83, 80, 0.2)',
+              bordercolor: '#ef5350',
+              label: 'Be-OB',
+              borderstyle: 'solid'
+            });
+
+            // Breaker / Mitigation Box
+            output.boxes.push({
+              id: `box-be-bb-${times[prev1.idx]}`,
+              x1: prev1.time,
+              y1: highPrices[prev1.idx],
+              x2: boxEnd,
+              y2: lowPrices[prev1.idx],
+              color: 'rgba(239, 83, 80, 0.12)',
+              bordercolor: '#ef5350',
+              label: prev1.val > (swings[s - 3]?.val || 0) ? 'Be-BB' : 'Be-MB',
+              borderstyle: 'dotted'
+            });
+          }
+        }
+      }
+    }
+
+    // --- 5. Harmonic AB=CD Patterns ---
+    if (showABCD && candles.length >= 25) {
+      const pivots: { idx: number; val: number; isHigh: boolean }[] = [];
+      const halfAbcd = Math.max(2, Math.floor(abcdLen / 2));
+
+      for (let i = halfAbcd; i < candles.length - halfAbcd; i++) {
+        let isHigh = true;
+        let isLow = true;
+        for (let k = -halfAbcd; k <= halfAbcd; k++) {
+          if (k === 0) continue;
+          if (highPrices[i + k] >= highPrices[i]) isHigh = false;
+          if (lowPrices[i + k] <= lowPrices[i]) isLow = false;
+        }
+        if (isHigh) pivots.push({ idx: i, val: highPrices[i], isHigh: true });
+        else if (isLow) pivots.push({ idx: i, val: lowPrices[i], isHigh: false });
+      }
+
+      for (let p = 2; p < pivots.length; p++) {
+        const pA = pivots[p - 2];
+        const pB = pivots[p - 1];
+        const pC = pivots[p];
+
+        const av = pA.val;
+        const bv = pB.val;
+        const cv = pC.val;
+
+        // Bullish AB=CD pattern
+        const abcdBull = av > bv && (cv - bv) <= (0.89 * (av - bv)) && (cv - bv) >= (0.38 * (av - bv));
+        if (abcdBull) {
+          const evalIdx = Math.min(candles.length - 1, pC.idx + 3);
+          if ((cv - lowPrices[evalIdx]) >= (av - bv) * 0.85) {
+            output.labels.push({
+              id: `lbl-abcd-bull-${times[pC.idx]}`,
+              x: times[pC.idx],
+              y: lowPrices[pC.idx] - (highPrices[pC.idx] - lowPrices[pC.idx]) * 0.5,
+              text: 'Bullish AB=CD',
+              color: 'rgba(76, 175, 79, 0.25)',
+              textcolor: '#4caf50',
+              badge: true
+            });
+          }
+        }
+
+        // Bearish AB=CD pattern
+        const abcdBear = av < bv && (bv - cv) <= (0.89 * (bv - av)) && (bv - cv) >= (0.38 * (bv - av));
+        if (abcdBear) {
+          const evalIdx = Math.min(candles.length - 1, pC.idx + 3);
+          if ((highPrices[evalIdx] - cv) >= (bv - av) * 0.85) {
+            output.labels.push({
+              id: `lbl-abcd-bear-${times[pC.idx]}`,
+              x: times[pC.idx],
+              y: highPrices[pC.idx] + (highPrices[pC.idx] - lowPrices[pC.idx]) * 0.5,
+              text: 'Bearish AB=CD',
+              color: 'rgba(255, 82, 82, 0.25)',
+              textcolor: '#ff5252',
+              badge: true
+            });
+          }
+        }
+      }
+    }
+
+    // --- 6. Dynamic Targets (Target 1 & Target 2) ---
+    if (showTargets && candles.length >= 20) {
+      const atr50 = TA.atr(highPrices, lowPrices, closePrices, Math.min(candles.length - 2, 50));
+      const atr10 = TA.atr(highPrices, lowPrices, closePrices, 10);
+      
+      const stValues: number[] = [];
+      const stDir: number[] = [];
+      let curUpper = 0;
+      let curLower = 0;
+      let curDir = 1;
+
+      for (let i = 0; i < candles.length; i++) {
+        const a = atr10[i] || (highPrices[i] - lowPrices[i]);
+        const up = closePrices[i] + 3.0 * a;
+        const dn = closePrices[i] - 3.0 * a;
+        if (i === 0) {
+          curUpper = up;
+          curLower = dn;
+          curDir = 1;
+        } else {
+          const pClose = closePrices[i - 1];
+          curLower = (dn > curLower || pClose < curLower) ? dn : curLower;
+          curUpper = (up < curUpper || pClose > curUpper) ? up : curUpper;
+          if (curDir === 1) {
+            if (closePrices[i] < curLower) curDir = -1;
+          } else {
+            if (closePrices[i] > curUpper) curDir = 1;
+          }
+        }
+        stDir[i] = curDir;
+        stValues[i] = curDir === 1 ? curLower : curUpper;
+      }
+
+      let target1Active = false;
+      let target1Val = 0;
+      let target1StartIdx = 0;
+
+      let target2Active = false;
+      let target2Val = 0;
+      let target2StartIdx = 0;
+
+      for (let i = 15; i < candles.length; i++) {
+        const curClose = closePrices[i];
+        const curAtr = atr50[i] || (curClose * 0.008);
+        const st = stValues[i];
+        const prevSt = stValues[i - 1];
+
+        // Bullish Target Trigger (Supertrend Flip Up or Signal cross)
+        if (st && prevSt && curClose > st && closePrices[i - 1] <= prevSt && !target1Active) {
+          target1Active = true;
+          target1StartIdx = i;
+          target1Val = curClose + curAtr * distTarget1;
+
+          output.labels.push({
+            id: `target1-lbl-${times[i]}`,
+            x: times[i],
+            y: target1Val,
+            text: 'Target',
+            color: 'rgba(8, 153, 129, 0.35)',
+            textcolor: '#089981',
+            badge: true
+          });
+        }
+
+        // Check if Target 1 reached
+        if (target1Active) {
+          if (highPrices[i] >= target1Val || i === candles.length - 1) {
+            output.lines.push({
+              id: `target1-line-${times[target1StartIdx]}`,
+              x1: times[target1StartIdx],
+              y1: target1Val,
+              x2: times[i],
+              y2: target1Val,
+              color: '#089981',
+              width: 1.5,
+              style: 'dotted',
+              label: 'Target'
+            });
+            target1Active = false;
+          }
+        }
+
+        // Bearish Target Trigger (Supertrend Flip Down)
+        if (st && prevSt && curClose < st && closePrices[i - 1] >= prevSt && !target2Active) {
+          target2Active = true;
+          target2StartIdx = i;
+          target2Val = curClose - curAtr * distTarget2;
+
+          output.labels.push({
+            id: `target2-lbl-${times[i]}`,
+            x: times[i],
+            y: target2Val,
+            text: 'Target',
+            color: 'rgba(242, 54, 70, 0.35)',
+            textcolor: '#f23646',
+            badge: true
+          });
+        }
+
+        // Check if Target 2 reached
+        if (target2Active) {
+          if (lowPrices[i] <= target2Val || i === candles.length - 1) {
+            output.lines.push({
+              id: `target2-line-${times[target2StartIdx]}`,
+              x1: times[target2StartIdx],
+              y1: target2Val,
+              x2: times[i],
+              y2: target2Val,
+              color: '#f23646',
+              width: 1.5,
+              style: 'dotted',
+              label: 'Target'
+            });
+            target2Active = false;
+          }
+        }
+      }
+    }
+
+    // --- 7. Zig Zag Trendlines & Support/Resistance Channels ---
+    if (showTrendlines && candles.length >= 30) {
+      const pLen = 20;
+      const tVal: number[] = [];
+      const tPos: number[] = [];
+      const bVal: number[] = [];
+      const bPos: number[] = [];
+
+      for (let i = pLen; i < candles.length - pLen; i++) {
+        let isHigh = true;
+        let isLow = true;
+        for (let k = 1; k <= pLen; k++) {
+          if (highPrices[i - k] >= highPrices[i] || highPrices[i + k] > highPrices[i]) isHigh = false;
+          if (lowPrices[i - k] <= lowPrices[i] || lowPrices[i + k] < lowPrices[i]) isLow = false;
+        }
+        if (isHigh) {
+          tVal.push(highPrices[i]);
+          tPos.push(i);
+        }
+        if (isLow) {
+          bVal.push(lowPrices[i]);
+          bPos.push(i);
+        }
+      }
+
+      // Uptrend support lines
+      if (bPos.length >= 2) {
+        const p1 = bPos.length - 1;
+        const p2 = bPos.length - 2;
+        const x1 = times[bPos[p2]];
+        const y1 = bVal[p2];
+        const x2 = times[bPos[p1]];
+        const y2 = bVal[p1];
+        if (y2 >= y1) {
+          output.lines.push({
+            id: `trendline-up-${x1}`,
+            x1,
+            y1,
+            x2,
+            y2,
+            color: '#00e676',
+            width: 1.5,
+            style: 'solid',
+            label: 'Support Trend'
+          });
+        }
+      }
+
+      // Downtrend resistance lines
+      if (tPos.length >= 2) {
+        const p1 = tPos.length - 1;
+        const p2 = tPos.length - 2;
+        const x1 = times[tPos[p2]];
+        const y1 = tVal[p2];
+        const x2 = times[tPos[p1]];
+        const y2 = tVal[p1];
+        if (y2 <= y1) {
+          output.lines.push({
+            id: `trendline-dn-${x1}`,
+            x1,
+            y1,
+            x2,
+            y2,
+            color: '#ef5350',
+            width: 1.5,
+            style: 'solid',
+            label: 'Resistance Trend'
+          });
+        }
+      }
+    }
+
+    // --- 8. Gann Square of 9 Levels ---
+    if (showGann && candles.length >= 10) {
+      const curPrice = closePrices[closePrices.length - 1];
+      let denominator = 1;
+      if (curPrice >= 10000) denominator = 0.01;
+      else if (curPrice >= 1000) denominator = 0.1;
+      else if (curPrice >= 100) denominator = 1;
+      else if (curPrice >= 10) denominator = 10;
+      else if (curPrice >= 0.05) denominator = 100;
+      else denominator = 1000;
+
+      const scaled = curPrice * denominator;
+      const gannNums: number[] = [2];
+      for (let min = 0; min <= 20; min++) {
+        for (let i = 0; i < 4; i++) {
+          const lastNum = gannNums[gannNums.length - 1];
+          if (min === 0 && i === 0) gannNums.push(min + (min + 2));
+          else if (min > 0 && i === 0) gannNums.push(Math.round(lastNum) + (min + 1) + min);
+          else gannNums.push(Math.round(lastNum) + (min + 2) + min);
+        }
+      }
+
+      let resPrice = curPrice * 1.01;
+      let supPrice = curPrice * 0.99;
+      for (let g = 0; g < gannNums.length - 1; g++) {
+        if (gannNums[g] <= scaled && gannNums[g + 1] > scaled) {
+          supPrice = gannNums[g] / denominator;
+          resPrice = gannNums[g + 1] / denominator;
+          break;
+        }
+      }
+      const midGann = (supPrice + resPrice) / 2;
+
+      const gannStart = times[Math.max(0, candles.length - 40)];
+      const gannEnd = times[candles.length - 1];
+
+      output.lines.push({
+        id: 'gann-r1',
+        x1: gannStart,
+        y1: resPrice,
+        x2: gannEnd,
+        y2: resPrice,
+        color: '#ef5350',
+        width: 1,
+        style: 'dashed',
+        label: `R1 = ${resPrice.toFixed(2)}`
+      });
+
+      output.lines.push({
+        id: 'gann-s1',
+        x1: gannStart,
+        y1: supPrice,
+        x2: gannEnd,
+        y2: supPrice,
+        color: '#00e676',
+        width: 1,
+        style: 'dashed',
+        label: `S1 = ${supPrice.toFixed(2)}`
+      });
+
+      output.lines.push({
+        id: 'gann-blue',
+        x1: gannStart,
+        y1: midGann,
+        x2: gannEnd,
+        y2: midGann,
+        color: '#2196f3',
+        width: 1,
+        style: 'solid',
+        label: `Mid = ${midGann.toFixed(2)}`
+      });
+    }
+
+    // --- 9. Supply & Demand Volume Profile Zones ---
+    if (showSupplyDemand && candles.length >= 25) {
+      const recentCandles = candles.slice(-50);
+      let highestHigh = -Infinity;
+      let lowestLow = Infinity;
+      recentCandles.forEach(c => {
+        if (c.high > highestHigh) highestHigh = c.high;
+        if (c.low < lowestLow) lowestLow = c.low;
+      });
+
+      const zoneRange = highestHigh - lowestLow;
+      if (zoneRange > 0) {
+        const supplyTop = highestHigh;
+        const supplyBtm = highestHigh - zoneRange * 0.12;
+        const demandTop = lowestLow + zoneRange * 0.12;
+        const demandBtm = lowestLow;
+
+        const zoneStart = times[candles.length - recentCandles.length];
+        const zoneEnd = times[candles.length - 1];
+
+        // Supply Zone (top)
+        output.boxes.push({
+          id: `supply-zone-${zoneStart}`,
+          x1: zoneStart,
+          y1: supplyTop,
+          x2: zoneEnd,
+          y2: supplyBtm,
+          color: 'rgba(33, 86, 243, 0.16)',
+          bordercolor: '#2156f3',
+          borderstyle: 'solid',
+          label: 'Supply Zone'
+        });
+
+        // Demand Zone (bottom)
+        output.boxes.push({
+          id: `demand-zone-${zoneStart}`,
+          x1: zoneStart,
+          y1: demandTop,
+          x2: zoneEnd,
+          y2: demandBtm,
+          color: 'rgba(255, 94, 0, 0.16)',
+          bordercolor: '#ff5e00',
+          borderstyle: 'solid',
+          label: 'Demand Zone'
+        });
+      }
+    }
+
+    // --- 10. Information Panel / Dashboard ---
+    if (infoPan) {
+      output.tables = [
+        {
+          id: 'ob_info_panel',
+          title: 'LATEST ORDER BLOCKS',
+          position: 'top_right',
+          size: 'small',
+          rows: [
+            [
+              { text: 'LATEST ORDER BLOCKS', bold: true, align: 'center', color: '#38bdf8' },
+              { text: '', align: 'right' }
+            ],
+            [
+              { text: '🟢 Bullish OB High', align: 'left', color: '#cbd5e1' },
+              { text: latestBullHigh > 0 ? latestBullHigh.toFixed(2) : '—', bold: true, align: 'right', color: '#26a69a' }
+            ],
+            [
+              { text: '🟢 Bullish OB Avg', align: 'left', color: '#cbd5e1' },
+              { text: latestBullAvg > 0 ? latestBullAvg.toFixed(2) : '—', bold: true, align: 'right', color: '#26a69a' }
+            ],
+            [
+              { text: '🟢 Bullish OB Low', align: 'left', color: '#cbd5e1' },
+              { text: latestBullLow > 0 ? latestBullLow.toFixed(2) : '—', bold: true, align: 'right', color: '#26a69a' }
+            ],
+            [
+              { text: '🔴 Bearish OB High', align: 'left', color: '#cbd5e1' },
+              { text: latestBearHigh > 0 ? latestBearHigh.toFixed(2) : '—', bold: true, align: 'right', color: '#ef5350' }
+            ],
+            [
+              { text: '🔴 Bearish OB Avg', align: 'left', color: '#cbd5e1' },
+              { text: latestBearAvg > 0 ? latestBearAvg.toFixed(2) : '—', bold: true, align: 'right', color: '#ef5350' }
+            ],
+            [
+              { text: '🔴 Bearish OB Low', align: 'left', color: '#cbd5e1' },
+              { text: latestBearLow > 0 ? latestBearLow.toFixed(2) : '—', bold: true, align: 'right', color: '#ef5350' }
+            ]
+          ]
+        }
+      ];
+    }
+
+    return output;
+  }
+
+  // ==========================================
+  // 14B. BANKER FUND FLOW TREND OSCILLATOR WITH TDI LEO
+  // ==========================================
+  if (
+    indicator.id === 'banker_fund_flow_tdi_leo' ||
+    indicator.id.includes('banker_fund_flow') ||
+    indicator.name.toLowerCase().includes('banker fund flow') ||
+    indicator.name.toLowerCase().includes('tdi leo') ||
+    (indicator.code && indicator.code.toLowerCase().includes('banker fund flow')) ||
+    (indicator.code && indicator.code.toLowerCase().includes('fundtrend')) ||
+    idLower.includes('banker')
+  ) {
+    output.overlay = false;
+    output.name = 'Banker Fund Flow Trend Oscillator with TDI LEO';
+
+    // 1. Helper xsa (Modified Moving Average smoothing)
+    const xsa = (src: number[], len: number, wei: number): number[] => {
+      const n = src.length;
+      const out: number[] = new Array(n);
+      let sumf = 0;
+      let runningOut: number | null = null;
+      for (let i = 0; i < n; i++) {
+        const s = src[i];
+        const s_len = i >= len ? src[i - len] : 0;
+        sumf = sumf - s_len + s;
+        if (i < len - 1) {
+          out[i] = s;
+          runningOut = s;
+        } else if (runningOut === null) {
+          const ma = sumf / len;
+          runningOut = ma;
+          out[i] = ma;
+        } else {
+          runningOut = (s * wei + runningOut * (len - wei)) / len;
+          out[i] = runningOut;
+        }
+      }
+      return out;
+    };
+
+    // 2. Banker Fund Flow Trend Model
+    // (close - lowest(low, 27)) / (highest(high, 27) - lowest(low, 27)) * 100
+    const raw27: number[] = [];
+    for (let i = 0; i < candles.length; i++) {
+      let ll = Infinity;
+      let hh = -Infinity;
+      const start = Math.max(0, i - 26);
+      for (let k = start; k <= i; k++) {
+        if (lowPrices[k] < ll) ll = lowPrices[k];
+        if (highPrices[k] > hh) hh = highPrices[k];
+      }
+      const span = hh - ll;
+      raw27.push(span === 0 ? 50 : ((closePrices[i] - ll) / span) * 100);
+    }
+
+    const s1 = xsa(raw27, 5, 1);
+    const s2 = xsa(s1, 3, 1);
+
+    const fundtrendArr: number[] = [];
+    for (let i = 0; i < candles.length; i++) {
+      const v = ((3 * s1[i] - 2 * s2[i] - 50) * 1.032 + 50);
+      fundtrendArr.push(Math.max(-10, Math.min(110, v)));
+    }
+
+    // 3. Typical price & bullbearline over 34 bars
+    // typ = (2*close + high + low + open) / 5
+    // bullbearline = EMA((typ - lowest(low, 34)) / (highest(high, 34) - lowest(low, 34)) * 100, 13)
+    const bullbearRaw: number[] = [];
+    for (let i = 0; i < candles.length; i++) {
+      const typ = (2 * closePrices[i] + highPrices[i] + lowPrices[i] + openPrices[i]) / 5;
+      let lol = Infinity;
+      let hoh = -Infinity;
+      const start = Math.max(0, i - 33);
+      for (let k = start; k <= i; k++) {
+        if (lowPrices[k] < lol) lol = lowPrices[k];
+        if (highPrices[k] > hoh) hoh = highPrices[k];
+      }
+      const span = hoh - lol;
+      bullbearRaw.push(span === 0 ? 50 : ((typ - lol) / span) * 100);
+    }
+
+    const bullbearlineArrNullable = TA.ema(bullbearRaw, 13);
+    const bullbearlineArr = bullbearlineArrNullable.map((v, i) => (v !== null && !isNaN(v)) ? v : bullbearRaw[i]);
+
+    // 4. Banker Data Points (Green, White, Red, Blue, Yellow Entry)
+    const bankerData: BankerFundFlowPoint[] = [];
+    for (let i = 0; i < candles.length; i++) {
+      const ft = fundtrendArr[i];
+      const bbl = bullbearlineArr[i];
+      const prevFt = i > 0 ? fundtrendArr[i - 1] : ft;
+      const isEntry = i > 0 && fundtrendArr[i - 1] <= bullbearlineArr[i - 1] && ft > bbl && bbl < 25;
+
+      let color = 'rgba(76, 175, 79, 0.75)'; // Green (increase / accumulation)
+      if (ft < prevFt * 0.95) {
+        color = '#ffffff'; // White (decrease position)
+      } else if (ft < bbl) {
+        if (ft > prevFt * 0.95) {
+          color = 'rgba(33, 149, 243, 0.9)'; // Blue (weak rebound)
+        } else {
+          color = 'rgba(255, 82, 82, 0.75)'; // Red (exit/quit)
+        }
+      } else if (ft > bbl) {
+        color = 'rgba(76, 175, 79, 0.75)'; // Green
+      }
+
+      if (isEntry) {
+        output.signals.push({
+          time: times[i],
+          type: 'BUY',
+          price: closePrices[i],
+          comment: 'Banker Fund Entry'
+        });
+      }
+
+      bankerData.push({
+        time: times[i],
+        fundtrend: ft,
+        bullbearline: bbl,
+        color,
+        entrySignal: isEntry
+      });
+    }
+    output.bankerData = bankerData;
+
+    // 5. TDI (Traders Dynamic Index)
+    const rsiPeriod = Math.max(2, Number(params.RSI_input ?? 21));
+    const tlPeriod = Math.max(2, Number(params.TL_input ?? 7));
+    const blPeriod = Math.max(5, Number(params.BL_input ?? 34));
+    const vbMult = Number(params.VB_input ?? 1.6185);
+
+    const rsiRaw = TA.rsi(closePrices, rsiPeriod);
+    const validRsi = rsiRaw.map(v => v === null ? 50 : v);
+    const rPlot = TA.sma(validRsi, 2);
+    const rTl = TA.sma(validRsi, tlPeriod);
+    const rGbl = TA.sma(validRsi, blPeriod);
+    const stdevR = TA.stdev(validRsi, blPeriod);
+
+    const vbUp = rGbl.map((g, i) => (g !== null && stdevR[i] !== null) ? g + vbMult * stdevR[i]! : null);
+    const vbDown = rGbl.map((g, i) => (g !== null && stdevR[i] !== null) ? g - vbMult * stdevR[i]! : null);
+
+    output.plots = [
+      rPlot.map((v, i) => ({ time: times[i], value: v, color: '#1dc72b', label: 'RSI' })),
+      rTl.map((v, i) => ({ time: times[i], value: v, color: '#FF0000', label: 'RSI TrendLine' })),
+      rGbl.map((v, i) => ({ time: times[i], value: v, color: '#ff9800', label: 'Market Baseline' })),
+      vbUp.map((v, i) => ({ time: times[i], value: v, color: '#80deea', label: 'Volatility Upper' })),
+      vbDown.map((v, i) => ({ time: times[i], value: v, color: '#80deea', label: 'Volatility Lower' }))
+    ];
+
+    // 6. Overbought & Oversold Shaded Zones & Reference Lines
+    output.oscillatorBands = [
+      { top: 90, bottom: 85, color: 'rgba(223, 64, 251, 0.35)', label: 'Overbought (85-90)' },
+      { top: 15, bottom: 10, color: 'rgba(255, 153, 0, 0.35)', label: 'Oversold (10-15)' }
+    ];
+
+    output.oscillatorHlines = [
+      { value: 90, color: '#e040fb', style: 'dotted', label: '90' },
+      { value: 85, color: '#ef5350', style: 'dotted', label: '85' },
+      { value: 70, color: 'rgba(255, 255, 255, 0.3)', style: 'dashed', label: '70' },
+      { value: 50, color: 'rgba(255, 255, 255, 0.25)', style: 'dashed', label: '50' },
+      { value: 30, color: 'rgba(255, 255, 255, 0.3)', style: 'dashed', label: '30' },
+      { value: 15, color: '#ffb300', style: 'dotted', label: '15' },
+      { value: 10, color: '#76ff03', style: 'dotted', label: '10' }
+    ];
+
+    // 7. Divergences (Bear, Bull, H Bear, H Bull)
+    const lbL = Math.max(1, Number(params.lbL ?? 6));
+    const lbR = Math.max(1, Number(params.lbR ?? 2));
+    const rangeUpper = Math.max(10, Number(params.rangeUpper ?? 60));
+    const rangeLower = Math.max(2, Number(params.rangeLower ?? 5));
+    const plotBull = Boolean(params.plotBull ?? true);
+    const plotBear = Boolean(params.plotBear ?? true);
+    const plotHiddenBull = Boolean(params.plotHiddenBull ?? false);
+    const plotHiddenBear = Boolean(params.plotHiddenBear ?? false);
+
+    const oscValues = rPlot.map(v => v === null ? 50 : v);
+    const plFound: { idx: number; val: number; price: number; time: number }[] = [];
+    const phFound: { idx: number; val: number; price: number; time: number }[] = [];
+
+    for (let i = lbL; i < candles.length - lbR; i++) {
+      let isPivotLow = true;
+      let isPivotHigh = true;
+      const cur = oscValues[i];
+
+      for (let k = 1; k <= lbL; k++) {
+        if (oscValues[i - k] <= cur) isPivotLow = false;
+        if (oscValues[i - k] >= cur) isPivotHigh = false;
+      }
+      for (let k = 1; k <= lbR; k++) {
+        if (oscValues[i + k] <= cur) isPivotLow = false;
+        if (oscValues[i + k] >= cur) isPivotHigh = false;
+      }
+
+      if (isPivotLow) plFound.push({ idx: i, val: cur, price: lowPrices[i], time: times[i] });
+      if (isPivotHigh) phFound.push({ idx: i, val: cur, price: highPrices[i], time: times[i] });
+    }
+
+    // Bearish Divergence
+    if (phFound.length >= 2) {
+      for (let j = 1; j < phFound.length; j++) {
+        const prev = phFound[j - 1];
+        const curr = phFound[j];
+        const barDist = curr.idx - prev.idx;
+        if (barDist < rangeLower || barDist > rangeUpper) continue;
+
+        const oscLH = curr.val < prev.val;
+        const priceHH = curr.price > prev.price;
+        const oscHH = curr.val > prev.val;
+        const priceLH = curr.price < prev.price;
+
+        if (plotBear && priceHH && oscLH) {
+          output.labels.push({
+            id: `bear-div-${curr.time}`,
+            x: curr.time,
+            y: curr.val + 4,
+            text: 'Bear',
+            color: '#ef5350',
+            textcolor: '#ffffff',
+            badge: true
+          });
+          output.lines.push({
+            id: `bear-line-${curr.time}`,
+            x1: prev.time,
+            y1: prev.val,
+            x2: curr.time,
+            y2: curr.val,
+            color: '#ef5350',
+            width: 2,
+            style: 'solid'
+          });
+        } else if (plotHiddenBear && priceLH && oscHH) {
+          output.labels.push({
+            id: `h-bear-div-${curr.time}`,
+            x: curr.time,
+            y: curr.val + 4,
+            text: 'H Bear',
+            color: '#ef5350',
+            textcolor: '#ffffff',
+            badge: true
+          });
+        }
+      }
+    }
+
+    // Bullish Divergence
+    if (plFound.length >= 2) {
+      for (let j = 1; j < plFound.length; j++) {
+        const prev = plFound[j - 1];
+        const curr = plFound[j];
+        const barDist = curr.idx - prev.idx;
+        if (barDist < rangeLower || barDist > rangeUpper) continue;
+
+        const oscHL = curr.val > prev.val;
+        const priceLL = curr.price < prev.price;
+        const oscLL = curr.val < prev.val;
+        const priceHL = curr.price > prev.price;
+
+        if (plotBull && priceLL && oscHL) {
+          output.labels.push({
+            id: `bull-div-${curr.time}`,
+            x: curr.time,
+            y: curr.val - 4,
+            text: 'Bull',
+            color: '#26a69a',
+            textcolor: '#ffffff',
+            badge: true
+          });
+          output.lines.push({
+            id: `bull-line-${curr.time}`,
+            x1: prev.time,
+            y1: prev.val,
+            x2: curr.time,
+            y2: curr.val,
+            color: '#26a69a',
+            width: 2,
+            style: 'solid'
+          });
+        } else if (plotHiddenBull && priceHL && oscLL) {
+          output.labels.push({
+            id: `h-bull-div-${curr.time}`,
+            x: curr.time,
+            y: curr.val - 4,
+            text: 'H Bull',
+            color: '#26a69a',
+            textcolor: '#ffffff',
+            badge: true
+          });
+        }
+      }
+    }
+
+    return output;
+  }
+
+  // ==========================================
+  // 15. PARSE STANDARD PINE SCRIPT (SMA, HMA, etc.)
   // ==========================================
   const variables: Record<string, (number | null)[]> = {
     'close': closePrices,

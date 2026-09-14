@@ -10,9 +10,11 @@ import {
   sendPasswordResetEmail
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
-import { auth, db } from '../lib/firebase';
+import { ref, update as rtdbUpdate } from 'firebase/database';
+import { auth, db, rtdb } from '../lib/firebase';
 import { AuthUser } from '../types';
-import { loadUserSettingsFromCloud, initSettingsSync } from '../lib/settingsSync';
+import { loadUserSettingsFromCloud, initSettingsSync, extractStoreSettings } from '../lib/settingsSync';
+import { useMarketStore } from '../store/useMarketStore';
 
 export interface UserProfileData {
   uid?: string;
@@ -116,6 +118,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await setDoc(userRef, payload);
       } else {
         await updateDoc(userRef, payload);
+      }
+
+      // Also persist/update user profile under users/<UID> in Realtime Database
+      try {
+        const rtdbUserRef = ref(rtdb, `users/${uid}`);
+        const rtdbPayload: Record<string, any> = {
+          lastLoginAt: now,
+          watchlist: useMarketStore.getState().watchlist || [],
+          settings: extractStoreSettings()
+        };
+        if (resolvedEmail) rtdbPayload.email = resolvedEmail;
+        if (resolvedName) rtdbPayload.displayName = resolvedName;
+        if (resolvedPhone) rtdbPayload.phoneNumber = resolvedPhone;
+        if (resolvedPhoto) rtdbPayload.photoURL = resolvedPhoto;
+        await rtdbUpdate(rtdbUserRef, rtdbPayload);
+      } catch (rtdbErr) {
+        console.warn('Realtime Database profile sync notice:', rtdbErr);
       }
 
       const updatedUser: AuthUser = {

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, X, TrendingUp, LineChart, PenTool, Clock, Settings, Bell, Camera, RotateCcw, Moon, Sun, ArrowRight } from 'lucide-react';
+import { Search, X, TrendingUp, LineChart, PenTool, Clock, Settings, Bell, Camera, RotateCcw, Moon, Sun, ArrowRight, Star, Download } from 'lucide-react';
 import { useMarketStore } from '../../store/useMarketStore';
 import { INDICATORS_LIST } from '../../lib/indicatorsList';
 import { Timeframe } from '../../types';
+import { usePWAInstall } from '../../hooks/usePWAInstall';
 
 interface SearchItem {
   id: string;
@@ -30,7 +31,10 @@ export const QuickSearchModal: React.FC = () => {
     setAlertModalOpen,
     setChartSettingsOpen,
     setScreenshotModalOpen,
+    watchlist
   } = useMarketStore();
+
+  const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
 
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -65,12 +69,13 @@ export const QuickSearchModal: React.FC = () => {
 
   // 1. Symbols
   availableSymbols.forEach(sym => {
+    const isWatchlisted = (watchlist || []).some(w => w.toLowerCase() === sym.id.toLowerCase() || w.toLowerCase() === sym.symbol.toLowerCase());
     allItems.push({
       id: `sym-${sym.id}`,
       title: `${sym.display} (${sym.symbol})`,
       category: 'symbol',
-      description: sym.marketDisplay || sym.market,
-      icon: <TrendingUp className="w-4 h-4 text-emerald-400" />,
+      description: `${sym.marketDisplay || sym.market}${isWatchlisted ? ' • ⭐ Watchlist' : ''}`,
+      icon: isWatchlisted ? <Star className="w-4 h-4 fill-amber-400 text-amber-400" /> : <TrendingUp className="w-4 h-4 text-emerald-400" />,
       action: () => {
         setSymbol(sym.id);
         setQuickSearchOpen(false);
@@ -206,7 +211,20 @@ export const QuickSearchModal: React.FC = () => {
         clearDrawings(activeSymbol);
         setQuickSearchOpen(false);
       }
-    }
+    },
+    ...(!isInstalled && (isInstallable || isIOS) ? [{
+      id: 'act-install-pwa',
+      title: 'Install OTIVO App (PWA)',
+      category: 'action' as const,
+      description: 'Install native standalone app on Desktop, Android, or iOS',
+      icon: <Download className="w-4 h-4 text-emerald-400" />,
+      action: () => {
+        setQuickSearchOpen(false);
+        if (isInstallable) {
+          install();
+        }
+      }
+    }] : [])
   );
 
   const filteredItems = query.trim()

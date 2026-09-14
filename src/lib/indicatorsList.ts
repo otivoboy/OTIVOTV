@@ -759,6 +759,475 @@ detect_bull = input.bool(true, "Detect Bullish")
 detect_bear = input.bool(true, "Detect Bearish")
 pole_atr = input.float(2.2, "Pole ATR Multiplier")
 show_target = input.bool(true, "Show Measured Target")`
+  },
+  {
+    id: 'money_algorithm',
+    name: 'Money Algorithm',
+    category: 'Strategies',
+    description: 'Comprehensive algorithmic execution system featuring Trend Tracer baseline, dynamic Trend Cloud, Supertrend Buy/Sell & Strong confirmation signals, WaveTrend PullBack signals, dynamic TP/SL risk management, and Smart Panel multi-timeframe dashboard.',
+    overlay: true,
+    defaultParams: {
+      showSignals: true,
+      sensitivity: 2.4,
+      STuner: 15,
+      Presets: 'All Signals',
+      TextStyle: 'Minimal',
+      consSignalsFilter: false,
+      StrongSignalsOnly: false,
+      highVolSignals: false,
+      signalsTrendCloud: false,
+      ContrarianOnly: false,
+      Show_PR: true,
+      MSTuner: 5,
+      TrendMap: 'Trend Gradient',
+      momentumCandles: false,
+      LongTrendAverage: true,
+      LTAsensitivity: 250,
+      showTrendCloud: true,
+      periodTrendCloud: 'Smooth',
+      showDashboard: true,
+      locationDashboard: 'Bottom Right',
+      sizeDashboard: 'Small',
+      tpLabels: true,
+      ShowTpSlAreas: false,
+      ShowTrailingSL: false,
+      usePercSL: false,
+      percTrailingSL: 1.0,
+      useTP1: true,
+      multTP1: 1.0,
+      useTP2: true,
+      multTP2: 2.0,
+      useTP3: true,
+      multTP3: 3.0,
+      ShowSwings: false,
+      periodSwings: 10,
+      bullcolor: '#16e045',
+      bearcolor: '#e1320f'
+    },
+    paramDefinitions: [
+      // Calculations & Signals
+      { key: 'showSignals', name: "Show Signal's", type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'sensitivity', name: 'Sensitivity', type: 'float', default: 2.4, min: 0.1, max: 10.0, step: 0.1, category: 'Calculations' },
+      { key: 'STuner', name: 'Signal Tuner (1-25)', type: 'int', default: 15, min: 1, max: 25, category: 'Calculations' },
+      { 
+        key: 'Presets', 
+        name: 'Presets Mode', 
+        type: 'select', 
+        default: 'All Signals', 
+        options: [
+          { label: 'All Signals', value: 'All Signals' },
+          { label: 'Strong+', value: 'Strong+' },
+          { label: 'Trend Scalper', value: 'Trend Scalper' }
+        ],
+        category: 'Calculations'
+      },
+      {
+        key: 'TextStyle',
+        name: 'Signal Style',
+        type: 'select',
+        default: 'Minimal',
+        options: [
+          { label: 'Minimal (▲ / ▼)', value: 'Minimal' },
+          { label: 'Normal (Buy / Sell)', value: 'Normal' }
+        ],
+        category: 'Visuals'
+      },
+      // Filters
+      { key: 'consSignalsFilter', name: 'Trending Signal Only (ADX > 20)', type: 'bool', default: false, category: 'Directions & Signals' },
+      { key: 'StrongSignalsOnly', name: 'Strong Signals Only (EMA 200 Filter)', type: 'bool', default: false, category: 'Directions & Signals' },
+      { key: 'highVolSignals', name: 'High Volume Signals Only', type: 'bool', default: false, category: 'Directions & Signals' },
+      { key: 'signalsTrendCloud', name: 'Cloud Signals Only', type: 'bool', default: false, category: 'Directions & Signals' },
+      { key: 'ContrarianOnly', name: 'Contrarian Signals Only', type: 'bool', default: false, category: 'Directions & Signals' },
+      // Pullback
+      { key: 'Show_PR', name: 'Show PullBack Signals (WaveTrend Trap)', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'MSTuner', name: 'PullBack Tuner (2-30)', type: 'int', default: 5, min: 2, max: 30, category: 'Calculations' },
+      // Trend Tracer & Cloud
+      { key: 'LongTrendAverage', name: 'Show Trend Tracer EMA Line', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'LTAsensitivity', name: 'Trend Tracer Length', type: 'int', default: 250, min: 20, max: 500, category: 'Calculations' },
+      { key: 'showTrendCloud', name: 'Show Dynamic Trend Cloud', type: 'bool', default: true, category: 'Visuals' },
+      {
+        key: 'periodTrendCloud',
+        name: 'Trend Cloud Style',
+        type: 'select',
+        default: 'Smooth',
+        options: [
+          { label: 'Smooth (EMA 150/250)', value: 'Smooth' },
+          { label: 'Scalping', value: 'Scalping' },
+          { label: 'Scalping+ (HMA 55)', value: 'Scalping+' },
+          { label: 'Swing', value: 'Swing' }
+        ],
+        category: 'Calculations'
+      },
+      // Smart Panel Dashboard
+      { key: 'showDashboard', name: 'Show Smart Panel Dashboard', type: 'bool', default: true, category: 'Visuals' },
+      {
+        key: 'locationDashboard',
+        name: 'Table Location',
+        type: 'select',
+        default: 'Bottom Right',
+        options: [
+          { label: 'Bottom Right', value: 'Bottom Right' },
+          { label: 'Top Right', value: 'Top Right' },
+          { label: 'Top Left', value: 'Top Left' },
+          { label: 'Bottom Left', value: 'Bottom Left' },
+          { label: 'Middle Right', value: 'Middle Right' }
+        ],
+        category: 'Visuals'
+      },
+      // Risk Management
+      { key: 'tpLabels', name: 'Dynamic Take Profit Labels (RSI)', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'ShowTpSlAreas', name: 'Show Take Profit / Stop-Loss Areas', type: 'bool', default: false, category: 'Visuals' },
+      { key: 'ShowTrailingSL', name: 'Show Trailing Stop-Loss Line', type: 'bool', default: false, category: 'Visuals' },
+      { key: 'useTP1', name: 'Enable TP 1 Target', type: 'bool', default: true, category: 'Calculations' },
+      { key: 'multTP1', name: 'TP 1 Multiplier', type: 'float', default: 1.0, min: 0.1, max: 10.0, step: 0.1, category: 'Calculations' },
+      { key: 'useTP2', name: 'Enable TP 2 Target', type: 'bool', default: true, category: 'Calculations' },
+      { key: 'multTP2', name: 'TP 2 Multiplier', type: 'float', default: 2.0, min: 0.1, max: 10.0, step: 0.1, category: 'Calculations' },
+      { key: 'useTP3', name: 'Enable TP 3 Target', type: 'bool', default: true, category: 'Calculations' },
+      { key: 'multTP3', name: 'TP 3 Multiplier', type: 'float', default: 3.0, min: 0.1, max: 10.0, step: 0.1, category: 'Calculations' },
+      { key: 'ShowSwings', name: 'Show Market Structure Swings (HH/LL)', type: 'bool', default: false, category: 'Visuals' },
+      // Colors
+      { key: 'bullcolor', name: 'Bullish Color', type: 'color', default: '#16e045', category: 'Visuals' },
+      { key: 'bearcolor', name: 'Bearish Color', type: 'color', default: '#e1320f', category: 'Visuals' }
+    ],
+    code: `//@version=5
+indicator(" MONEY ALGORITHM ", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=350)
+
+bullcolor = #16e045
+bearcolor = #e1320f
+
+gr_signal = "MAIN SETTINGS"
+gr_PullBacksignal = "PULLBACK SIGNALS SETTINGS"
+gr_Other_Settings = "CLOUD SETTINGS"
+gr_TrendTracer = "TREND TRACER SETTINGS"
+gr_signalfilter = "SIGNAL FILTERS"
+gr_candle = "CANDLE COLORING"
+gr_RiskManage = "RISK MANAGEMENT"
+gr_dash = "SMART PANEL"
+
+showSignals       = input(true, "Show Signal's", group=gr_signal)
+sensitivity       = input.float(2.4, "Sensitivity", 0.1, step=0.1, group=gr_signal)
+STuner            = input.int(15, "Signal Tuner(1-25)", minval = 1, maxval = 25, group=gr_signal)
+Presets           = input.string("All Signals", "Presets", ["All Signals", "Strong+", "Trend Scalper"], group=gr_signal)
+TextStyle         = input.string("Minimal", "Signal Style", ["Normal", "Minimal"], group=gr_signal)
+
+consSignalsFilter = input(false, "Trending Signal Only", group=gr_signalfilter)
+StrongSignalsOnly = input(false, "Strong Signals Only", group=gr_signalfilter)
+highVolSignals    = input(false, "High Volume Signals only", group=gr_signalfilter)
+signalsTrendCloud = input(false, "Cloud Signals only", group=gr_signalfilter)
+ContrarianOnly    = input(false, "Contrarian Signals Only", group=gr_signalfilter)
+
+Show_PR           = input.bool(true, title="Show PullBack Signals", group=gr_PullBacksignal)
+MSTuner           = input.int(5, "PullBack Tuner(2-30)", minval=2, maxval=30, group=gr_PullBacksignal)
+
+LongTrendAverage  = input(true, 'Trend Tracer', group=gr_TrendTracer)
+LTAsensitivity    = input.int(250, 'Trend Tracer Length', group=gr_TrendTracer)
+
+showTrendCloud    = input(true, "Show Trend cloud", group=gr_Other_Settings)
+periodTrendCloud  = input.string("Smooth", "Trend Cloud Style", ["Smooth", "Scalping", "Scalping+", "Swing"], group=gr_Other_Settings)
+
+showDashboard     = input(true, "Smart Panel", group=gr_dash)
+locationDashboard = input.string("Bottom Right", "Table Location", ["Top Right", "Middle Right", "Bottom Right", "Top Left", "Bottom Left"], group=gr_dash)
+
+tpLabels          = input(true, "Dynamic Take Profit Lables", group=gr_RiskManage)
+ShowTpSlAreas     = input(false, "Show take Profit/Stop-loss Area", group=gr_RiskManage)
+ShowTrailingSL    = input(false, "Show trailing Stop-loss", group=gr_RiskManage)
+
+useTP1            = input(true, "TP 1 Active", group=gr_RiskManage)
+multTP1           = input.float(1.0, "TP 1", group=gr_RiskManage)
+useTP2            = input(true, "TP 2 Active", group=gr_RiskManage)
+multTP2           = input.float(2.0, "TP 2", group=gr_RiskManage)
+useTP3            = input(true, "TP 3 Active", group=gr_RiskManage)
+multTP3           = input.float(3.0, "TP 3", group=gr_RiskManage)
+ShowSwings        = input(false, "Show Market Structure", group=gr_RiskManage)
+
+// Trend Tracer (EMA 250)
+plot(LongTrendAverage ? ta.ema(close, LTAsensitivity) : na, 'Trend Tracer', color=close[8] > ta.ema(close, LTAsensitivity) ? bullcolor : bearcolor)`
+  },
+  {
+    id: 'linreg_candles_ob_target',
+    name: 'Linear Regression Candles with OB and Target',
+    category: 'Smart Money',
+    description: 'Comprehensive institutional suite integrating Linear Regression smoothed candles, Order Block (OB) identification with high/low levels, Market Structure Break (MSB) & Breaker/Mitigation boxes, Harmonic AB=CD pattern recognition, dynamic Target 1 & 2 projections, Hull Suite trend ribbon, Gann Square of 9 levels, and Supply/Demand volume zones.',
+    overlay: true,
+    defaultParams: {
+      colors: 'BRIGHT',
+      periods: 5,
+      threshold: 0.0,
+      usewicks: false,
+      showbull: true,
+      showbear: true,
+      showdocu: false,
+      info_pan: false,
+      signal_length: 7,
+      sma_signal: true,
+      lin_reg: true,
+      linreg_length: 11,
+      show_hull: true,
+      hull_length: 55,
+      hull_mode: 'Hma',
+      show_abcd: true,
+      abcd_len: 5,
+      show_targets: true,
+      distTarget1: 3.0,
+      distTarget2: 3.0,
+      show_msb_ob: true,
+      zigzag_len: 9,
+      show_trendlines: true,
+      show_gann: true,
+      show_supply_demand: true
+    },
+    paramDefinitions: [
+      {
+        key: 'colors',
+        name: 'Color Scheme',
+        type: 'select',
+        default: 'BRIGHT',
+        options: [
+          { label: 'BRIGHT', value: 'BRIGHT' },
+          { label: 'DARK', value: 'DARK' }
+        ],
+        category: 'General'
+      },
+      { key: 'lin_reg', name: 'Enable Linear Regression Candles', type: 'bool', default: true, category: 'Calculations' },
+      { key: 'linreg_length', name: 'Linear Regression Length', type: 'int', default: 11, min: 1, max: 200, category: 'Calculations' },
+      { key: 'signal_length', name: 'Signal Smoothing Length', type: 'int', default: 7, min: 1, max: 200, category: 'Calculations' },
+      { key: 'sma_signal', name: 'Simple MA for Signal Line (vs EMA)', type: 'bool', default: true, category: 'Calculations' },
+      { key: 'periods', name: 'Relevant Periods for OB Confirmation', type: 'int', default: 5, min: 1, max: 20, category: 'Calculations' },
+      { key: 'threshold', name: 'Min. Percent Move to Identify OB (%)', type: 'float', default: 0.0, min: 0.0, max: 20.0, step: 0.1, category: 'Calculations' },
+      { key: 'usewicks', name: 'Use High/Low Range for OB (vs Open/Close)', type: 'bool', default: false, category: 'Visuals' },
+      { key: 'showbull', name: 'Show Latest Bullish OB Channel', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'showbear', name: 'Show Latest Bearish OB Channel', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'show_msb_ob', name: 'Show MSB & Breaker / Mitigation Blocks', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'zigzag_len', name: 'ZigZag Swings Length', type: 'int', default: 9, min: 2, max: 50, category: 'Calculations' },
+      { key: 'show_abcd', name: 'Show Harmonic AB=CD Patterns', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'abcd_len', name: 'AB=CD Pivot Length', type: 'int', default: 5, min: 2, max: 20, category: 'Calculations' },
+      { key: 'show_targets', name: 'Show Dynamic Target Levels', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'distTarget1', name: 'Target 1 Distance (ATR Multiplier)', type: 'float', default: 3.0, min: 0.5, max: 10.0, step: 0.5, category: 'Calculations' },
+      { key: 'distTarget2', name: 'Target 2 Distance (ATR Multiplier)', type: 'float', default: 3.0, min: 0.5, max: 10.0, step: 0.5, category: 'Calculations' },
+      { key: 'show_hull', name: 'Show Hull Suite Trend Ribbon', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'hull_length', name: 'Hull Suite Length', type: 'int', default: 55, min: 5, max: 300, category: 'Calculations' },
+      {
+        key: 'hull_mode',
+        name: 'Hull Variation Mode',
+        type: 'select',
+        default: 'Hma',
+        options: [
+          { label: 'Hma (Hull MA)', value: 'Hma' },
+          { label: 'Thma (Triple Hull MA)', value: 'Thma' },
+          { label: 'Ehma (Exponential Hull MA)', value: 'Ehma' }
+        ],
+        category: 'Calculations'
+      },
+      { key: 'show_trendlines', name: 'Show ZigZag Trend Lines & Channels', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'show_gann', name: 'Show Gann Square of 9 Levels', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'show_supply_demand', name: 'Show Supply & Demand Zones', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'info_pan', name: 'Show Latest OB Stats Info Panel', type: 'bool', default: false, category: 'Visuals' }
+    ],
+    code: `//@version=5
+indicator("Linear Regression Candles with OB and Target", format=format.price, precision=4, overlay = true, max_bars_back = 4000,max_lines_count=500,max_labels_count=500, max_boxes_count=500)               
+
+colors    = input.string(title = "Color Scheme", defval="BRIGHT", options=["DARK", "BRIGHT"])
+periods   = input(5,     "Relevant Periods to identify OB")
+threshold = input.float(0.0,   "Min. Percent move to identify OB", step = 0.1)
+usewicks  = input(false, "Use whole range [High/Low] for OB marking?" )
+showbull  = input(true,  "Show latest Bullish Channel?")
+showbear  = input(true,  "Show latest Bearish Channel?")
+showdocu  = input(false, "Show Label for documentation tooltip?")
+info_pan  = input(false, "Show Latest OB Panel?")
+
+ob_period = periods + 1
+absmove   = ((math.abs(close[ob_period] - close[1]))/close[ob_period]) * 100
+relmove   = absmove >= threshold
+
+bullcolor = colors == "DARK"? color.white : color.green
+bearcolor = colors == "DARK"? color.blue : color.red
+
+bullishOB = close[ob_period] < open[ob_period]
+
+int upcandles  = 0
+for i = 1 to periods
+    upcandles := upcandles + (close[i] > open[i]? 1 : 0)
+
+OB_bull      = bullishOB and (upcandles == (periods)) and relmove
+OB_bull_high = OB_bull? usewicks? high[ob_period] : open[ob_period] : na
+OB_bull_low  = OB_bull? low[ob_period]  : na
+OB_bull_avg  = (OB_bull_high + OB_bull_low)/2
+
+bearishOB = close[ob_period] > open[ob_period]
+
+int downcandles  = 0
+for i = 1 to periods
+    downcandles := downcandles + (close[i] < open[i]? 1 : 0)
+
+OB_bear      = bearishOB and (downcandles == (periods)) and relmove
+OB_bear_high = OB_bear? high[ob_period] : na
+OB_bear_low  = OB_bear? usewicks? low[ob_period] : open[ob_period] : na
+OB_bear_avg  = (OB_bear_low + OB_bear_high)/2
+
+plotshape(OB_bull, title="Bullish OB", style = shape.triangleup, color = bullcolor, textcolor = bullcolor, size = size.tiny, location = location.belowbar, offset = -ob_period, text = "Bullish OB")
+bull1 = plot(OB_bull_high, title="Bullish OB High", style = plot.style_linebr, color = bullcolor, offset = -ob_period, linewidth = 3)
+bull2 = plot(OB_bull_low,  title="Bullish OB Low",  style = plot.style_linebr, color = bullcolor, offset = -ob_period, linewidth = 3)
+fill(bull1, bull2, color=bullcolor, transp = 0, title = "Bullish OB fill")
+plotshape(OB_bull_avg, title="Bullish OB Average", style = shape.cross, color = bullcolor, size = size.normal, location = location.absolute, offset = -ob_period)
+
+plotshape(OB_bear, title="Bearish OB", style = shape.triangledown, color = bearcolor, textcolor = bearcolor, size = size.tiny, location = location.abovebar, offset = -ob_period, text = "Bearish OB")
+bear1 = plot(OB_bear_low,  title="Bearish OB Low",  style = plot.style_linebr, color = bearcolor, offset = -ob_period, linewidth = 3)
+bear2 = plot(OB_bear_high, title="Bearish OB High", style = plot.style_linebr, color = bearcolor, offset = -ob_period, linewidth = 3)
+fill(bear1, bear2, color=bearcolor, transp = 0, title = "Bearish OB fill")
+plotshape(OB_bear_avg, title="Bearish OB Average", style = shape.cross, color = bearcolor, size = size.normal, location = location.absolute, offset = -ob_period)
+
+signal_length = input.int(title="Signal Smoothing", minval = 1, maxval = 200, defval = 7)
+sma_signal = input.bool(title="Simple MA (Signal Line)", defval=true)
+lin_reg = input.bool(title="Lin Reg", defval=true)
+linreg_length = input.int(title="Linear Regression Length", minval = 1, maxval = 200, defval = 11)
+
+bopen = lin_reg ? ta.linreg(open, linreg_length, 0) : open
+bhigh = lin_reg ? ta.linreg(high, linreg_length, 0) : high
+blow = lin_reg ? ta.linreg(low, linreg_length, 0) : low
+bclose = lin_reg ? ta.linreg(close, linreg_length, 0) : close
+r = bopen < bclose
+signal = sma_signal ? ta.sma(bclose, signal_length) : ta.ema(bclose, signal_length)
+
+plotcandle(r ? bopen : na, r ? bhigh : na, r ? blow: na, r ? bclose : na, title="LinReg Candles", color=color.green, wickcolor=color.green, bordercolor=color.green)
+plotcandle(r ? na : bopen, r ? na : bhigh, r ? na : blow, r ? na : bclose, title="LinReg Candles", color=color.red, wickcolor=color.red, bordercolor=color.red)
+plot(signal, color=color.blue, linewidth = 2)`
+  },
+  {
+    id: 'banker_fund_flow_tdi_leo',
+    name: 'Banker Fund Flow Trend Oscillator with TDI LEO',
+    category: 'Oscillator',
+    description: 'Advanced institutional momentum suite combining Banker Fund Flow Trend bars (green accumulation, white distribution, red exit, blue weak rebound), Traders Dynamic Index (TDI) RSI/TrendLine/Baseline/Volatility bands, overbought (85-90) & oversold (10-15) shaded zones, and multi-oscillator regular & hidden divergence detection.',
+    overlay: false,
+    defaultParams: {
+      RSI_input: 21,
+      TL_input: 7,
+      BL_input: 34,
+      VB_input: 1.6185,
+      oscillator: 'RSI',
+      lbL: 6,
+      lbR: 2,
+      rangeUpper: 60,
+      rangeLower: 5,
+      plotBull: true,
+      plotHiddenBull: false,
+      plotBear: true,
+      plotHiddenBear: false,
+      is_showDataTBL: false,
+      is_showLotSize: false,
+      Capital: 50000,
+      RiskPerTrade: 1.0,
+      PipsRisked: 30
+    },
+    paramDefinitions: [
+      { key: 'RSI_input', name: 'TDI RSI Length', type: 'int', default: 21, min: 2, max: 100, category: 'Calculations' },
+      { key: 'TL_input', name: 'TDI TrendLine Length', type: 'int', default: 7, min: 2, max: 100, category: 'Calculations' },
+      { key: 'BL_input', name: 'TDI Market BaseLine Length', type: 'int', default: 34, min: 5, max: 200, category: 'Calculations' },
+      { key: 'VB_input', name: 'Volatility Bands Multiplier', type: 'float', default: 1.6185, min: 0.5, max: 5.0, step: 0.1, category: 'Calculations' },
+      {
+        key: 'oscillator',
+        name: 'Divergence Oscillator',
+        type: 'select',
+        default: 'RSI',
+        options: [
+          { label: 'RSI', value: 'RSI' },
+          { label: 'MACD', value: 'MACD' },
+          { label: 'Stochastic', value: 'Stochastic' },
+          { label: 'Money Flow', value: 'Money Flow' },
+          { label: 'Demand Index', value: 'Demand Index' },
+          { label: 'Chaikin Money Flow', value: 'Chaikin Money flow' }
+        ],
+        category: 'Calculations'
+      },
+      { key: 'lbL', name: 'Pivot Lookback Left', type: 'int', default: 6, min: 1, max: 50, category: 'Calculations' },
+      { key: 'lbR', name: 'Pivot Lookback Right', type: 'int', default: 2, min: 1, max: 50, category: 'Calculations' },
+      { key: 'rangeUpper', name: 'Max Lookback Range', type: 'int', default: 60, min: 10, max: 200, category: 'Calculations' },
+      { key: 'rangeLower', name: 'Min Lookback Range', type: 'int', default: 5, min: 2, max: 50, category: 'Calculations' },
+      { key: 'plotBull', name: 'Plot Regular Bullish Divergence', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'plotBear', name: 'Plot Regular Bearish Divergence', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'plotHiddenBull', name: 'Plot Hidden Bullish Divergence', type: 'bool', default: false, category: 'Directions & Signals' },
+      { key: 'plotHiddenBear', name: 'Plot Hidden Bearish Divergence', type: 'bool', default: false, category: 'Directions & Signals' },
+      { key: 'is_showDataTBL', name: 'Show TDI & Multi-TF Data Table', type: 'bool', default: false, category: 'Visuals' },
+      { key: 'is_showLotSize', name: 'Show Position Size Calculator', type: 'bool', default: false, category: 'Visuals' }
+    ],
+    code: `//@version=5
+indicator("Banker Fund Flow Trend Oscillator with TDI LEO", overlay=false, format=format.price)
+
+//functions
+xrf(values, length) =>
+    r_val = float(na)
+    if length >= 1
+        for i = 0 to length by 1
+            if na(r_val) or not na(values[i])
+                r_val  :=  values[i]
+                r_val
+    r_val
+
+xsa(src,len,wei) =>
+    sumf = 0.0
+    ma = 0.0
+    out = 0.0
+    sumf  :=  nz(sumf[1]) - nz(src[len]) + src
+    ma  :=  na(src[len]) ? na : sumf/len
+    out  :=  na(out[1]) ? ma : (src*wei+out[1]*(len-wei))/len
+    out
+    
+//set up a simple model of banker fund flow trend	
+fundtrend = ((3*xsa((close- ta.lowest(low,27))/(ta.highest(high,27)-ta.lowest(low,27))*100,5,1)-2*xsa(xsa((close-ta.lowest(low,27))/(ta.highest(high,27)-ta.lowest(low,27))*100,5,1),3,1)-50)*1.032+50)
+//define typical price for banker fund
+typ = (2*close+high+low+open)/5
+//lowest low with mid term fib # 34
+lol = ta.lowest(low,34)
+//highest high with mid term fib # 34
+hoh = ta.highest(high,34)
+//define banker fund flow bull bear line
+bullbearline = ta.ema((typ-lol)/(hoh-lol)*100,13)
+//define banker entry signal
+bankerentry = ta.crossover(fundtrend,bullbearline) and bullbearline<25
+
+//banker increase position with green candle
+plotcandle(fundtrend,bullbearline,fundtrend,bullbearline,color=fundtrend>bullbearline ? color.new(#4caf4f, 60):na)
+
+//banker decrease position with white candle
+plotcandle(fundtrend,bullbearline,fundtrend,bullbearline,color=fundtrend<(xrf(fundtrend*0.95,1)) ? color.new(#ffffff, 100):na)
+
+//banker fund exit/quit with red candle
+plotcandle(fundtrend,bullbearline,fundtrend,bullbearline,color=fundtrend<bullbearline ? color.new(#ff5252, 60):na)
+
+//banker fund Weak rebound with blue candle
+plotcandle(fundtrend,bullbearline,fundtrend,bullbearline,color=fundtrend<bullbearline and fundtrend>(xrf(fundtrend*0.95,1)) ? color.new(#2195f3, 100):na)
+
+//overbought and oversold threshold lines
+h1 = hline(85,color=color.red, linestyle=hline.style_dotted)
+h2 = hline(15, color=color.yellow, linestyle=hline.style_dotted)
+h3 = hline(10,color=color.lime, linestyle=hline.style_dotted)
+h4 = hline(90, color=color.fuchsia, linestyle=hline.style_dotted)
+fill(h2,h3,color=color.rgb(255, 153, 0, 30))
+fill(h1,h4,color=color.rgb(223, 64, 251, 30))
+
+// TDI - Traders Dynamic Index
+RSI_input = input.int(title="RSI", defval=21, minval=5)
+TL_input = input.int(title="TrendLine", defval=7, minval=3)
+BL_input = input.int(title="BaseLine", defval=34, minval=14)
+VB_input = input.float(title="Volatility Bands", defval=1.6185, minval=1.0)
+
+r = ta.rsi(close, RSI_input)
+r_plot = ta.sma(r, 2)
+r_tl = ta.sma(r, TL_input)
+r_gbl = ta.sma(r, BL_input)
+SD = VB_input * ta.stdev(r, BL_input)
+VB_UP = r_gbl + SD
+VB_DOWN = r_gbl - SD
+
+UL = 70, MID = 50, LL = 30
+hline(MID, 'Balance Level', color=color.rgb(10, 10, 10, 50), linestyle=hline.style_dashed)
+hline(UL, 'Upper Level', color=color.rgb(10, 10, 10, 80), linestyle=hline.style_dashed)
+hline(LL, 'Lower Level', color=color.rgb(10, 10, 10, 80), linestyle=hline.style_dashed)
+
+plot(r_plot, 'RSI', color=#1dc72b, linewidth=2)
+plot(r_tl, 'RSI TrendLine', color=#FF0000, linewidth=2)
+plot(r_gbl, 'Market Baseline', color=color.orange, linewidth=2)
+plot(VB_UP, 'Volatility Upper', color=#b2ebf2, linewidth=1)
+plot(VB_DOWN, 'Volatility Lower', color=#b2ebf2, linewidth=1)`
   }
 ];
 

@@ -265,6 +265,47 @@ function aggregateCandles(sourceCandles: Candle[], targetSeconds: number): Candl
   return aggregated;
 }
 
+// Add memoization layer for aggregations
+const aggregationCache: Record<string, { candles: Candle[], timestamp: number, sourceLength?: number, lastSourceTime?: number }> = {};
+const CACHE_TTL = 5000; // 5 seconds
+
+function getCachedAggregation(symbol: string, targetSeconds: number, sourceLength?: number, lastSourceTime?: number): Candle[] | null {
+  const key = `${symbol}_${targetSeconds}`;
+  const cached = aggregationCache[key];
+  
+  if (cached && (Date.now() - cached.timestamp < CACHE_TTL)) {
+    if (sourceLength !== undefined && cached.sourceLength !== undefined && cached.sourceLength !== sourceLength) {
+      return null;
+    }
+    if (lastSourceTime !== undefined && cached.lastSourceTime !== undefined && cached.lastSourceTime !== lastSourceTime) {
+      return null;
+    }
+    return cached.candles;
+  }
+  return null;
+}
+
+function aggregateCandlesWithCache(sourceCandles: Candle[], targetSeconds: number, symbol: string): Candle[] {
+  if (!sourceCandles || sourceCandles.length === 0) return [];
+  const lastSource = sourceCandles[sourceCandles.length - 1];
+  const lastSourceTime = lastSource ? lastSource.time : 0;
+  
+  const cached = getCachedAggregation(symbol, targetSeconds, sourceCandles.length, lastSourceTime);
+  if (cached) return cached;
+  
+  const aggregated = aggregateCandles(sourceCandles, targetSeconds);
+  
+  const key = `${symbol}_${targetSeconds}`;
+  aggregationCache[key] = { 
+    candles: aggregated, 
+    timestamp: Date.now(),
+    sourceLength: sourceCandles.length,
+    lastSourceTime 
+  };
+  
+  return aggregated;
+}
+
 function handleLiveCandleUpdate(symbol: string, liveCandle: Candle) {
   ensureStore(symbol);
   const price = liveCandle.close;
@@ -443,13 +484,13 @@ async function startServer() {
     // If higher timeframe is requested but empty, aggregate on the fly from available lower timeframes
     if ((!candlesStore[timeframe]?.[targetSymbol] || candlesStore[timeframe][targetSymbol].length === 0)) {
       if (timeframe === "5h" && candlesStore["1h"]?.[targetSymbol]?.length) {
-        candlesStore["5h"][targetSymbol] = aggregateCandles(candlesStore["1h"][targetSymbol], 18000);
+        candlesStore["5h"][targetSymbol] = aggregateCandlesWithCache(candlesStore["1h"][targetSymbol], 18000, targetSymbol);
       } else if (timeframe === "1w" && candlesStore["1d"]?.[targetSymbol]?.length) {
         candlesStore["1w"][targetSymbol] = aggregateDailyToWeekly(candlesStore["1d"][targetSymbol]);
       } else if (timeframe === "1M" && candlesStore["1d"]?.[targetSymbol]?.length) {
         candlesStore["1M"][targetSymbol] = aggregateDailyToMonthly(candlesStore["1d"][targetSymbol]);
       } else if (timeframe !== "1m" && candlesStore["1m"]?.[targetSymbol]?.length && TIMEFRAMES[timeframe]) {
-        candlesStore[timeframe][targetSymbol] = aggregateCandles(candlesStore["1m"][targetSymbol], TIMEFRAMES[timeframe]);
+        candlesStore[timeframe][targetSymbol] = aggregateCandlesWithCache(candlesStore["1m"][targetSymbol], TIMEFRAMES[timeframe], targetSymbol);
       }
     }
 
@@ -478,7 +519,7 @@ async function startServer() {
     const m1 = candlesStore["1m"]?.[targetSymbol] || [];
 
     if (h1.length > 0 && (!candlesStore["5h"]?.[targetSymbol] || candlesStore["5h"][targetSymbol].length === 0)) {
-      candlesStore["5h"][targetSymbol] = aggregateCandles(h1, 18000);
+      candlesStore["5h"][targetSymbol] = aggregateCandlesWithCache(h1, 18000, targetSymbol);
     }
     if (d1.length > 0) {
       if (!candlesStore["1w"]?.[targetSymbol] || candlesStore["1w"][targetSymbol].length === 0) {
@@ -491,7 +532,7 @@ async function startServer() {
     if (m1.length > 0) {
       ["5m", "15m", "30m", "1h"].forEach(tf => {
         if (!candlesStore[tf]?.[targetSymbol] || candlesStore[tf][targetSymbol].length === 0) {
-          candlesStore[tf][targetSymbol] = aggregateCandles(m1, TIMEFRAMES[tf]);
+          candlesStore[tf][targetSymbol] = aggregateCandlesWithCache(m1, TIMEFRAMES[tf], targetSymbol);
         }
       });
     }
@@ -704,14 +745,23 @@ async function startServer() {
 
           handleTick(symbol, price, epoch);
 
-          io.emit("tick", {
+          // Room-based tick emit to interested clients only
+          io.to(symbol).emit("tick", {
             symbol,
             price,
             time: epoch * 1000
           });
 
+          // Delta update optimization
+          const pairStore = candlesStore["1m"][symbol] || [];
+          const lastCandle = pairStore[pairStore.length - 1];
+
           const candleData = {
             symbol,
+            delta: {
+              newCandle: lastCandle,
+              modifiedIndex: Math.max(0, pairStore.length - 1)
+            },
             candlesByTimeframe: Object.keys(TIMEFRAMES).reduce((acc, tf) => {
                const store = candlesStore[tf]?.[symbol];
                const last = store && store[store.length - 1];
@@ -720,7 +770,7 @@ async function startServer() {
             }, {} as Record<string, Candle>)
           };
 
-          io.emit("candle_update", candleData);
+          // Emit delta candle update directly to the symbol room
           io.to(symbol).emit("candle_update", candleData);
           return;
         }
@@ -764,17 +814,7 @@ async function startServer() {
               timeframe: "1w",
               candles: weeklyCandles
             });
-            io.emit("history", {
-              symbol,
-              timeframe: "1w",
-              candles: weeklyCandles
-            });
             io.to(symbol).emit("history", {
-              symbol,
-              timeframe: "1M",
-              candles: monthlyCandles
-            });
-            io.emit("history", {
               symbol,
               timeframe: "1M",
               candles: monthlyCandles
@@ -783,7 +823,7 @@ async function startServer() {
 
           // If this is 1h data, aggregate and store 5h
           if (reqTf === "1h") {
-            const h5Candles = aggregateCandles(parsedCandles, 18000);
+            const h5Candles = aggregateCandlesWithCache(parsedCandles, 18000, symbol);
             candlesStore["5h"][symbol] = h5Candles;
             io.to(symbol).emit("history", {
               symbol,
@@ -797,18 +837,13 @@ async function startServer() {
             Object.entries(TIMEFRAMES).forEach(([tf, seconds]) => {
               if (tf === "1m" || tf === "1w" || tf === "1M") return;
               if (!candlesStore[tf][symbol] || candlesStore[tf][symbol].length === 0) {
-                candlesStore[tf][symbol] = aggregateCandles(parsedCandles, seconds);
+                candlesStore[tf][symbol] = aggregateCandlesWithCache(parsedCandles, seconds, symbol);
               }
             });
           }
 
-          // Send history to all clients viewing this symbol and timeframe
+          // Send history exclusively to clients viewing this symbol room
           io.to(symbol).emit("history", {
-            symbol,
-            timeframe: reqTf,
-            candles: parsedCandles
-          });
-          io.emit("history", {
             symbol,
             timeframe: reqTf,
             candles: parsedCandles

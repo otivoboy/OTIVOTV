@@ -28,10 +28,10 @@ const TIMEFRAME_TO_GRANULARITY: Record<string, number> = {
   "15m": 900,
   "30m": 1800,
   "1h": 3600,
-  "2h": 7200,
+  "2h": 3600, // Aggregate 1h to 2h (Deriv API does not support 7200)
   "4h": 14400,
   "5h": 3600, // Aggregate 1h to 5h
-  "8h": 28800,
+  "8h": 14400, // Aggregate 4h to 8h
   "1d": 86400,
   "1w": 86400, // Aggregate 1d to 1w
   "1M": 86400, // Aggregate 1d to 1M
@@ -291,7 +291,73 @@ class DerivDirectClient {
   }
 
   public getCachedCandles(symbol: string, timeframe: string): Candle[] | null {
-    return clientCandlesStore[timeframe]?.[symbol] || null;
+    const direct = clientCandlesStore[timeframe]?.[symbol];
+    if (direct && direct.length > 0) return direct;
+
+    const targetSeconds = TIMEFRAMES[timeframe];
+    if (!targetSeconds) return null;
+
+    if (timeframe === "2h" || timeframe === "5h") {
+      const h1 = clientCandlesStore["1h"]?.[symbol];
+      if (h1 && h1.length > 0) {
+        const aggregated = aggregateCandles(h1, targetSeconds);
+        if (aggregated.length > 0) {
+          if (!clientCandlesStore[timeframe]) clientCandlesStore[timeframe] = {};
+          clientCandlesStore[timeframe][symbol] = aggregated;
+          return aggregated;
+        }
+      }
+    }
+
+    if (timeframe === "8h") {
+      const h4 = clientCandlesStore["4h"]?.[symbol];
+      if (h4 && h4.length > 0) {
+        const aggregated = aggregateCandles(h4, targetSeconds);
+        if (aggregated.length > 0) {
+          if (!clientCandlesStore[timeframe]) clientCandlesStore[timeframe] = {};
+          clientCandlesStore[timeframe][symbol] = aggregated;
+          return aggregated;
+        }
+      }
+    }
+
+    if (timeframe === "1w") {
+      const d1 = clientCandlesStore["1d"]?.[symbol];
+      if (d1 && d1.length > 0) {
+        const aggregated = aggregateDailyToWeekly(d1);
+        if (aggregated.length > 0) {
+          if (!clientCandlesStore[timeframe]) clientCandlesStore[timeframe] = {};
+          clientCandlesStore[timeframe][symbol] = aggregated;
+          return aggregated;
+        }
+      }
+    }
+
+    if (timeframe === "1M") {
+      const d1 = clientCandlesStore["1d"]?.[symbol];
+      if (d1 && d1.length > 0) {
+        const aggregated = aggregateDailyToMonthly(d1);
+        if (aggregated.length > 0) {
+          if (!clientCandlesStore[timeframe]) clientCandlesStore[timeframe] = {};
+          clientCandlesStore[timeframe][symbol] = aggregated;
+          return aggregated;
+        }
+      }
+    }
+
+    if (["3m", "5m", "15m", "30m"].includes(timeframe)) {
+      const m1 = clientCandlesStore["1m"]?.[symbol];
+      if (m1 && m1.length > 0) {
+        const aggregated = aggregateCandles(m1, targetSeconds);
+        if (aggregated.length > 0) {
+          if (!clientCandlesStore[timeframe]) clientCandlesStore[timeframe] = {};
+          clientCandlesStore[timeframe][symbol] = aggregated;
+          return aggregated;
+        }
+      }
+    }
+
+    return null;
   }
 
   public start() {
@@ -507,8 +573,12 @@ class DerivDirectClient {
         let finalCandles = parsedCandles;
 
         // Custom timeframes aggregation
-        if (tf === "5h" && parsedCandles.length > 0) {
+        if (tf === "2h" && parsedCandles.length > 0) {
+          finalCandles = aggregateCandles(parsedCandles, 7200);
+        } else if (tf === "5h" && parsedCandles.length > 0) {
           finalCandles = aggregateCandles(parsedCandles, 18000);
+        } else if (tf === "8h" && parsedCandles.length > 0) {
+          finalCandles = aggregateCandles(parsedCandles, 28800);
         } else if (tf === "1w" && parsedCandles.length > 0) {
           finalCandles = aggregateDailyToWeekly(parsedCandles);
         } else if (tf === "1M" && parsedCandles.length > 0) {

@@ -1,5 +1,6 @@
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { ref, set, get, update, onValue, off } from 'firebase/database';
+import { db, rtdb, auth, handleFirestoreError, OperationType } from './firebase';
 import { useMarketStore } from '../store/useMarketStore';
 
 export type SyncStatus = 'idle' | 'saving' | 'synced' | 'error';
@@ -11,6 +12,7 @@ let currentSyncStatus: SyncStatus = 'idle';
 let lastSyncedAt: Date | null = null;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let isApplyingRemoteSettings = false;
+let activeRTDBUnsubscribe: (() => void) | null = null;
 
 function notifyListeners() {
   listeners.forEach((fn) => fn(currentSyncStatus, lastSyncedAt));
@@ -54,7 +56,7 @@ export function extractStoreSettings() {
 }
 
 /**
- * Loads user settings from Firestore account and applies them across the application.
+ * Loads user settings and watchlist from Realtime Database and Firestore accounts.
  */
 export async function loadUserSettingsFromCloud(userId: string): Promise<boolean> {
   if (!userId) return false;
@@ -65,7 +67,10 @@ export async function loadUserSettingsFromCloud(userId: string): Promise<boolean
       const demoData = localStorage.getItem('otivo_demo_user_settings');
       if (demoData) {
         const parsed = JSON.parse(demoData);
-        applyRemoteSettingsToStore(parsed);
+        applyRemoteSettingsToStore(parsed.settings || parsed);
+        if (Array.isArray(parsed.watchlist)) {
+          useMarketStore.getState().setWatchlist(parsed.watchlist);
+        }
         currentSyncStatus = 'synced';
         lastSyncedAt = new Date();
         notifyListeners();
@@ -75,6 +80,28 @@ export async function loadUserSettingsFromCloud(userId: string): Promise<boolean
     return false;
   }
 
+  // 1. First attempt fast fetch from Firebase Realtime Database
+  try {
+    const userRtdbRef = ref(rtdb, `users/${userId}`);
+    const rtdbSnap = await get(userRtdbRef);
+    if (rtdbSnap.exists()) {
+      const rtdbData = rtdbSnap.val();
+      if (rtdbData.settings) {
+        applyRemoteSettingsToStore(rtdbData.settings);
+      }
+      if (Array.isArray(rtdbData.watchlist) && rtdbData.watchlist.length > 0) {
+        useMarketStore.getState().setWatchlist(rtdbData.watchlist);
+      }
+      currentSyncStatus = 'synced';
+      lastSyncedAt = rtdbData.updatedAt ? new Date(rtdbData.updatedAt) : new Date();
+      notifyListeners();
+      return true;
+    }
+  } catch (rtdbErr) {
+    console.warn('Realtime Database initial load notice:', rtdbErr);
+  }
+
+  // 2. Fallback to Firestore
   const path = `users/${userId}/settings/preferences`;
   try {
     const settingsDocRef = doc(db, 'users', userId, 'settings', 'preferences');
@@ -190,7 +217,7 @@ function applyRemoteSettingsToStore(data: any) {
 }
 
 /**
- * Saves current store settings to Firestore.
+ * Saves current store settings and watchlist to Realtime Database and Firestore.
  */
 export async function saveUserSettingsToCloud(userId: string, immediate = false): Promise<void> {
   if (!userId) return;
@@ -198,7 +225,8 @@ export async function saveUserSettingsToCloud(userId: string, immediate = false)
   if (userId.startsWith('demo-trader-')) {
     try {
       const payload = {
-        ...extractStoreSettings(),
+        settings: extractStoreSettings(),
+        watchlist: useMarketStore.getState().watchlist || [],
         userId,
         updatedAt: new Date().toISOString()
       };
@@ -214,12 +242,35 @@ export async function saveUserSettingsToCloud(userId: string, immediate = false)
     currentSyncStatus = 'saving';
     notifyListeners();
 
+    const timestamp = new Date().toISOString();
+    const currentSettings = extractStoreSettings();
+    const currentWatchlist = useMarketStore.getState().watchlist || [];
+    const currentUser = auth.currentUser;
+
+    // 1. Save to Firebase Realtime Database (matching schema under /users/<USER_UID>/)
+    try {
+      const userRtdbRef = ref(rtdb, `users/${userId}`);
+      const rtdbPayload: Record<string, any> = {
+        watchlist: currentWatchlist,
+        settings: currentSettings,
+        updatedAt: timestamp
+      };
+      if (currentUser?.email) rtdbPayload.email = currentUser.email;
+      if (currentUser?.displayName) rtdbPayload.displayName = currentUser.displayName;
+
+      await update(userRtdbRef, rtdbPayload);
+    } catch (rtdbErr) {
+      console.warn('Realtime Database background sync warning:', rtdbErr);
+    }
+
+    // 2. Save to Firestore preferences collection
     const path = `users/${userId}/settings/preferences`;
     try {
       const payload = {
-        ...extractStoreSettings(),
+        ...currentSettings,
+        watchlist: currentWatchlist,
         userId,
-        updatedAt: new Date().toISOString()
+        updatedAt: timestamp
       };
 
       const settingsDocRef = doc(db, 'users', userId, 'settings', 'preferences');
@@ -229,7 +280,7 @@ export async function saveUserSettingsToCloud(userId: string, immediate = false)
       lastSyncedAt = new Date();
       notifyListeners();
     } catch (err: any) {
-      console.warn('Could not save settings to cloud (will retry on next change):', err);
+      console.warn('Could not save settings to Firestore (will retry on next change):', err);
       currentSyncStatus = 'error';
       notifyListeners();
       try {
@@ -247,22 +298,58 @@ export async function saveUserSettingsToCloud(userId: string, immediate = false)
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       doSave();
-    }, 1200); // 1.2s debounce to throttle user dragging/drawing/toggling
+    }, 1000); // 1.0s debounce
   }
 }
 
 /**
- * Initializes automatic sync binding for authenticated users.
+ * Initializes automatic sync binding and real-time listeners for authenticated users.
  */
 export function initSettingsSync(getUserId: () => string | null | undefined) {
-  // Subscribe to changes in the market store
-  const unsubscribe = useMarketStore.subscribe((state, prevState) => {
+  // Clear any existing RTDB listener
+  if (activeRTDBUnsubscribe) {
+    activeRTDBUnsubscribe();
+    activeRTDBUnsubscribe = null;
+  }
+
+  const userId = getUserId();
+  if (userId && !userId.startsWith('demo-trader-')) {
+    try {
+      const userRtdbRef = ref(rtdb, `users/${userId}`);
+      const unsub = onValue(userRtdbRef, (snapshot) => {
+        if (!snapshot.exists()) return;
+        if (isApplyingRemoteSettings) return;
+
+        const remoteData = snapshot.val();
+        if (remoteData) {
+          if (remoteData.settings) {
+            applyRemoteSettingsToStore(remoteData.settings);
+          }
+          if (Array.isArray(remoteData.watchlist)) {
+            const currentWatchlist = useMarketStore.getState().watchlist;
+            if (JSON.stringify(currentWatchlist) !== JSON.stringify(remoteData.watchlist)) {
+              useMarketStore.getState().setWatchlist(remoteData.watchlist);
+            }
+          }
+        }
+      });
+
+      activeRTDBUnsubscribe = () => {
+        off(userRtdbRef, 'value', unsub);
+      };
+    } catch (err) {
+      console.warn('Could not initialize Realtime Database live listener:', err);
+    }
+  }
+
+  // Subscribe to changes in the market store to push updates to cloud
+  const unsubscribeStore = useMarketStore.subscribe((state, prevState) => {
     if (isApplyingRemoteSettings) return;
 
-    const userId = getUserId();
-    if (!userId) return;
+    const currentUid = getUserId();
+    if (!currentUid) return;
 
-    // Check if any tracked setting actually changed
+    // Check if any tracked setting or watchlist actually changed
     const settingsChanged = 
       state.theme !== prevState.theme ||
       state.activeSymbol !== prevState.activeSymbol ||
@@ -279,12 +366,19 @@ export function initSettingsSync(getUserId: () => string | null | undefined) {
       state.multiLayout !== prevState.multiLayout ||
       state.taTimeframe !== prevState.taTimeframe ||
       state.pivotMode !== prevState.pivotMode ||
-      state.activePanel !== prevState.activePanel;
+      state.activePanel !== prevState.activePanel ||
+      state.watchlist !== prevState.watchlist;
 
     if (settingsChanged) {
-      saveUserSettingsToCloud(userId, false);
+      saveUserSettingsToCloud(currentUid, false);
     }
   });
 
-  return unsubscribe;
+  return () => {
+    unsubscribeStore();
+    if (activeRTDBUnsubscribe) {
+      activeRTDBUnsubscribe();
+      activeRTDBUnsubscribe = null;
+    }
+  };
 }

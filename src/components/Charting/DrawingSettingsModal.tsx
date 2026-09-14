@@ -71,6 +71,8 @@ export const DrawingSettingsModal: React.FC<DrawingSettingsModalProps> = ({
 
   // Generic drawing properties
   const [genericPrice, setGenericPrice] = useState<string>('');
+  const [startPrice, setStartPrice] = useState<string>('');
+  const [endPrice, setEndPrice] = useState<string>('');
   const [genericText, setGenericText] = useState<string>('');
 
   // Fib properties
@@ -115,12 +117,24 @@ export const DrawingSettingsModal: React.FC<DrawingSettingsModalProps> = ({
       setFibBackground(drawing.data?.fibBackground !== false);
       setLineColor(drawing.color || '#2962ff');
       setLineWidth(drawing.lineWidth || 1);
+      if (drawing.data?.start?.price !== undefined) {
+        setStartPrice(drawing.data.start.price.toString());
+      }
+      if (drawing.data?.end?.price !== undefined) {
+        setEndPrice(drawing.data.end.price.toString());
+      }
       setActiveTab('style');
     } else {
       setLineColor(drawing.color || '#2962ff');
       setLineWidth(drawing.lineWidth || 2);
       if (drawing.data?.price !== undefined) {
         setGenericPrice(drawing.data.price.toString());
+      }
+      if (drawing.data?.start?.price !== undefined) {
+        setStartPrice(drawing.data.start.price.toString());
+      }
+      if (drawing.data?.end?.price !== undefined) {
+        setEndPrice(drawing.data.end.price.toString());
       }
       if (drawing.data?.text !== undefined) {
         setGenericText(drawing.data.text);
@@ -183,7 +197,7 @@ export const DrawingSettingsModal: React.FC<DrawingSettingsModalProps> = ({
         }
       });
     } else if (isFib) {
-       onUpdate({
+       const updates: any = {
          color: lineColor,
          lineWidth,
          data: {
@@ -196,7 +210,14 @@ export const DrawingSettingsModal: React.FC<DrawingSettingsModalProps> = ({
            fibReverse,
            fibBackground
          }
-       });
+       };
+       if (startPrice !== '' && !isNaN(parseFloat(startPrice)) && updates.data.start) {
+         updates.data.start = { ...updates.data.start, price: parseFloat(startPrice) };
+       }
+       if (endPrice !== '' && !isNaN(parseFloat(endPrice)) && updates.data.end) {
+         updates.data.end = { ...updates.data.end, price: parseFloat(endPrice) };
+       }
+       onUpdate(updates);
     } else {
       const updates: any = {
         color: lineColor,
@@ -205,6 +226,12 @@ export const DrawingSettingsModal: React.FC<DrawingSettingsModalProps> = ({
       };
       if (genericPrice !== '' && !isNaN(parseFloat(genericPrice))) {
         updates.data.price = parseFloat(genericPrice);
+      }
+      if (startPrice !== '' && !isNaN(parseFloat(startPrice)) && updates.data.start) {
+        updates.data.start = { ...updates.data.start, price: parseFloat(startPrice) };
+      }
+      if (endPrice !== '' && !isNaN(parseFloat(endPrice)) && updates.data.end) {
+        updates.data.end = { ...updates.data.end, price: parseFloat(endPrice) };
       }
       if (genericText !== '') {
         updates.data.text = genericText;
@@ -433,8 +460,37 @@ export const DrawingSettingsModal: React.FC<DrawingSettingsModalProps> = ({
             </div>
           )}
 
-          {activeTab === 'inputs' && !isPosition && !isFib && (
+          {activeTab === 'inputs' && !isPosition && (
             <div className="space-y-4 text-xs">
+              {(drawing.data?.start?.price !== undefined || drawing.data?.end?.price !== undefined) && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="font-medium text-gray-300">Start Price</label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={startPrice}
+                      onChange={(e) => setStartPrice(e.target.value)}
+                      className={`w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono ${
+                        isDark ? 'bg-[#141722] border-[#2a2e39] text-white' : 'bg-white border-gray-300 text-gray-900'
+                      }`}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="font-medium text-gray-300">End Price</label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={endPrice}
+                      onChange={(e) => setEndPrice(e.target.value)}
+                      className={`w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono ${
+                        isDark ? 'bg-[#141722] border-[#2a2e39] text-white' : 'bg-white border-gray-300 text-gray-900'
+                      }`}
+                    />
+                  </div>
+                </div>
+              )}
+
               {drawing.data?.price !== undefined && (
                 <div className="space-y-1.5">
                   <label className="font-medium text-gray-300">Price Coordinate</label>

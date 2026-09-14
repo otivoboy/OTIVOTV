@@ -3,6 +3,10 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import { AuthProvider } from './context/AuthContext.tsx';
 import './index.css';
+import { registerSW } from 'virtual:pwa-register';
+
+// Register Service Worker immediately for PWA installability
+registerSW({ immediate: true });
 
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: any }> {
   constructor(props: { children: React.ReactNode }) {

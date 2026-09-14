@@ -12,12 +12,13 @@ import {
   AreaSeries,
   BaselineSeries,
   ColorType,
-  LineType
+  LineType,
+  CrosshairMode
 } from 'lightweight-charts';
 import { useMarketStore } from '../../store/useMarketStore';
 import { Candle, Tick, ChartType, Timeframe } from '../../types';
 import { calculateHeikinAshi } from '../../lib/heikinAshi';
-import { runPineEngine } from '../../lib/pineEngine';
+import { indicatorEngine } from '../../lib/IndicatorEngine';
 import { isMarketClosedWeekend } from '../../lib/marketHours';
 import { SymbolLogo } from '../SymbolLogo';
 import { getSymbolPriceFormat, formatSymbolPrice } from '../../lib/priceFormatter';
@@ -38,6 +39,7 @@ import {
   Palette,
   Maximize2,
   ChevronDown,
+  ChevronUp,
   Search,
   X,
   Layers,
@@ -47,7 +49,11 @@ import {
   MoreHorizontal,
   Clock,
   PaintBucket,
-  ArrowUpDown
+  ArrowUpDown,
+  Slash,
+  AlignJustify,
+  Magnet,
+  Check
 } from 'lucide-react';
 
 const TIMEFRAME_SECONDS: Record<string, number> = {
@@ -292,13 +298,11 @@ const getXFromTime = (timeScale: any, t: any, candles?: Candle[]): number | null
   const targetSec = parseTimeSec(t);
   if (targetSec === null) return null;
 
-  // 1. Try direct coordinate lookup first
+  // 1. Direct coordinate lookup (if exact bar match on visible screen)
   try {
     const directX = timeScale.timeToCoordinate(targetSec as Time);
-    if (directX !== null && !isNaN(directX)) return directX;
-  } catch {
-    // proceed to robust logical interpolation/extrapolation
-  }
+    if (directX !== null && directX !== undefined && !isNaN(directX)) return directX;
+  } catch {}
 
   if (!candles || candles.length === 0) return null;
 
@@ -344,51 +348,34 @@ const getXFromTime = (timeScale: any, t: any, candles?: Candle[]): number | null
 
   // 3. Convert logical index to screen pixel coordinate via timeScale
   try {
-    if (typeof timeScale.logicalToCoordinate === 'function') {
-      const coord = timeScale.logicalToCoordinate(logicalIdx as any);
-      if (coord !== null && !isNaN(coord)) {
-        return coord;
-      }
-      const floorIdx = Math.floor(logicalIdx);
-      const coordFloor = timeScale.logicalToCoordinate(floorIdx as any);
-      const coordCeil = timeScale.logicalToCoordinate((floorIdx + 1) as any);
-
-      if (coordFloor !== null && coordCeil !== null && !isNaN(coordFloor) && !isNaN(coordCeil)) {
-        return coordFloor + (logicalIdx - floorIdx) * (coordCeil - coordFloor);
-      }
-      if (coordFloor !== null && !isNaN(coordFloor)) {
-        const visRange = timeScale.getVisibleLogicalRange?.();
-        if (visRange && visRange.to > visRange.from) {
-          const xFrom = timeScale.logicalToCoordinate(visRange.from as any);
-          const xTo = timeScale.logicalToCoordinate(visRange.to as any);
-          if (xFrom !== null && xTo !== null) {
-            const barSpacing = (xTo - xFrom) / (visRange.to - visRange.from);
-            return coordFloor + (logicalIdx - floorIdx) * barSpacing;
-          }
-        }
-        return coordFloor;
-      }
-    }
-  } catch {
-    // fallback
-  }
-
-  // 4. Fallback using visible logical range
-  try {
     const visRange = timeScale.getVisibleLogicalRange?.();
     if (visRange && visRange.to > visRange.from) {
-      const xFrom = timeScale.logicalToCoordinate(visRange.from as any);
-      const xTo = timeScale.logicalToCoordinate(visRange.to as any);
-      if (xFrom !== null && xTo !== null && xTo > xFrom) {
-        const barSpacing = (xTo - xFrom) / (visRange.to - visRange.from);
-        return xFrom + (logicalIdx - visRange.from) * barSpacing;
+      const fromInt = Math.ceil(visRange.from);
+      const toInt = Math.floor(visRange.to);
+      if (toInt > fromInt) {
+        const x1 = timeScale.logicalToCoordinate(fromInt as any);
+        const x2 = timeScale.logicalToCoordinate(toInt as any);
+        if (x1 !== null && x2 !== null && !isNaN(x1) && !isNaN(x2)) {
+          const barSpacing = (x2 - x1) / (toInt - fromInt);
+          return x1 + (logicalIdx - fromInt) * barSpacing;
+        }
       }
     }
-  } catch {
-    // fallback
-  }
 
-  // 5. Fallback: Find any two candles that are currently visible
+    if (typeof timeScale.logicalToCoordinate === 'function') {
+      const floorIdx = Math.floor(logicalIdx);
+      const c1 = timeScale.logicalToCoordinate(floorIdx as any);
+      const c2 = timeScale.logicalToCoordinate((floorIdx + 1) as any);
+      if (c1 !== null && c2 !== null && !isNaN(c1) && !isNaN(c2)) {
+        return c1 + (logicalIdx - floorIdx) * (c2 - c1);
+      }
+      if (c1 !== null && !isNaN(c1)) {
+        return c1;
+      }
+    }
+  } catch {}
+
+  // 4. Ultimate fallback: calculate using any two sample candles
   try {
     let visibleA: { time: number; x: number } | null = null;
     let visibleB: { time: number; x: number } | null = null;
@@ -411,9 +398,7 @@ const getXFromTime = (timeScale: any, t: any, candles?: Candle[]): number | null
       const pxPerSec = (visibleB.x - visibleA.x) / (visibleB.time - visibleA.time);
       return visibleA.x + (targetSec - visibleA.time) * pxPerSec;
     }
-  } catch {
-    // ignore
-  }
+  } catch {}
 
   return null;
 };
@@ -421,16 +406,14 @@ const getXFromTime = (timeScale: any, t: any, candles?: Candle[]): number | null
 const getTimeFromX = (timeScale: any, x: number, candles?: Candle[]): number | null => {
   if (!timeScale) return null;
 
-  // 1. Direct coordinate lookup
+  // 1. Direct coordinate lookup (if directly hitting a bar)
   try {
     const directTime = timeScale.coordinateToTime(x);
     if (directTime !== null && directTime !== undefined) {
       const parsed = parseTimeSec(directTime);
       if (parsed !== null && !isNaN(parsed)) return parsed;
     }
-  } catch {
-    // proceed to logical calculation
-  }
+  } catch {}
 
   if (!candles || candles.length === 0) return null;
   const n = candles.length;
@@ -444,48 +427,42 @@ const getTimeFromX = (timeScale: any, x: number, candles?: Candle[]): number | n
     dt = Math.max(1, lastCandleTime - prevTime);
   }
 
-  // 2. Try coordinateToLogical
+  // 2. Continuous conversion from pixel X to logical index using visible range
   try {
-    if (typeof timeScale.coordinateToLogical === 'function') {
-      const logical = timeScale.coordinateToLogical(x);
-      if (logical !== null && logical !== undefined && !isNaN(logical)) {
-        if (logical >= 0 && logical < n) {
-          const idx = Math.max(0, Math.min(n - 1, Math.round(logical)));
-          const cTime = parseTimeSec(candles[idx].time);
-          if (cTime !== null) return cTime;
-        } else if (logical >= n) {
-          return Math.round(lastCandleTime + (logical - (n - 1)) * dt);
-        } else {
-          return Math.round(firstCandleTime + logical * dt);
-        }
-      }
-    }
-  } catch {
-    // fallback
-  }
-
-  // 3. Fallback using visible logical range
-  try {
+    let logical: number | null = null;
     const visRange = timeScale.getVisibleLogicalRange?.();
     if (visRange && visRange.to > visRange.from) {
-      const xFrom = timeScale.logicalToCoordinate(visRange.from as any);
-      const xTo = timeScale.logicalToCoordinate(visRange.to as any);
-      if (xFrom !== null && xTo !== null && xTo > xFrom) {
-        const pxPerBar = (xTo - xFrom) / (visRange.to - visRange.from);
-        const logical = visRange.from + (x - xFrom) / pxPerBar;
-        if (logical >= n) {
-          return Math.round(lastCandleTime + (logical - (n - 1)) * dt);
-        } else if (logical < 0) {
-          return Math.round(firstCandleTime + logical * dt);
-        } else {
-          const idx = Math.max(0, Math.min(n - 1, Math.round(logical)));
-          return parseTimeSec(candles[idx].time) || lastCandleTime;
+      const fromInt = Math.ceil(visRange.from);
+      const toInt = Math.floor(visRange.to);
+      if (toInt > fromInt) {
+        const x1 = timeScale.logicalToCoordinate(fromInt as any);
+        const x2 = timeScale.logicalToCoordinate(toInt as any);
+        if (x1 !== null && x2 !== null && !isNaN(x1) && !isNaN(x2)) {
+          const barSpacing = (x2 - x1) / (toInt - fromInt);
+          logical = fromInt + (x - x1) / barSpacing;
         }
       }
     }
-  } catch {
-    // ignore
-  }
+
+    if (logical === null && typeof timeScale.coordinateToLogical === 'function') {
+      const l = timeScale.coordinateToLogical(x);
+      if (l !== null && l !== undefined && !isNaN(l)) logical = l;
+    }
+
+    if (logical !== null) {
+      if (logical >= 0 && logical < n - 1) {
+        const idx = Math.floor(logical);
+        const frac = logical - idx;
+        const t0 = parseTimeSec(candles[idx].time) || 0;
+        const t1 = parseTimeSec(candles[idx + 1].time) || (t0 + dt);
+        return Math.round(t0 + frac * (t1 - t0));
+      } else if (logical >= n - 1) {
+        return Math.round(lastCandleTime + (logical - (n - 1)) * dt);
+      } else {
+        return Math.round(firstCandleTime + logical * dt);
+      }
+    }
+  } catch {}
 
   return lastCandleTime;
 };
@@ -544,7 +521,9 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     activeTool, drawings, addDrawing, setActiveTool, removeDrawing,
     updateDrawing, selectedDrawingId, setSelectedDrawing,
     activeIndicators, removeIndicator, updateIndicator, hiddenIndicators, toggleIndicatorVisibility,
-    chartType, chartSettings
+    chartType, chartSettings,
+    isMagnetMode: storeMagnetMode, toggleMagnetMode, magnetModeType,
+    isStayInDrawingMode, isLockAllDrawings, isHideAllDrawings, isHideAllIndicators
   } = useMarketStore();
 
   const effectiveSymbol = propSymbol || activeSymbol;
@@ -609,8 +588,20 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   const [startPoint, setStartPoint] = useState<{ time: number, price: number, x: number, y: number } | null>(null);
   const [middlePoint, setMiddlePoint] = useState<{ time: number, price: number, x: number, y: number } | null>(null);
   const [mousePos, setMousePos] = useState<{ x: number, y: number } | null>(null);
+  const [touchCrosshair, setTouchCrosshair] = useState<{ x: number, y: number, visible: boolean } | null>(null);
+  const touchCrosshairRef = useRef<{ x: number, y: number, visible: boolean } | null>(null);
+  useEffect(() => { touchCrosshairRef.current = touchCrosshair; }, [touchCrosshair]);
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState<any>(null);
+  
+  // Collapse/Expand applied indicator legends overlay state (persisted)
+  const [isIndicatorsLegendCollapsed, setIsIndicatorsLegendCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('tv_indicators_legend_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
   
   // Split pane symbol selector state
   const [showSymbolDropdown, setShowSymbolDropdown] = useState(false);
@@ -701,7 +692,9 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   useEffect(() => { startPointRef.current = startPoint; }, [startPoint]);
   useEffect(() => { mousePosRef.current = mousePos; }, [mousePos]);
   useEffect(() => { selectedDrawingIdRef.current = selectedDrawingId; }, [selectedDrawingId]);
-  useEffect(() => { candlesRef.current = displayCandles; }, [displayCandles]);
+  useEffect(() => { 
+    candlesRef.current = displayCandles.length > 1500 ? displayCandles.slice(-1500) : displayCandles; 
+  }, [displayCandles]);
 
   const lastResolvedSymbol = useRef<string>('');
   const prevCandlesCountRef = useRef<number>(0);
@@ -711,12 +704,78 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   const [hoveredHandle, setHoveredHandle] = useState<string | null>(null);
   const [selectedIndicatorForSettings, setSelectedIndicatorForSettings] = useState<string | null>(null);
   const [chartApi, setChartApi] = useState<IChartApi | null>(null);
+  const [isMagnetMode, setIsMagnetMode] = useState(false);
+  const isMagnetModeRef = useRef(false);
+  useEffect(() => { isMagnetModeRef.current = isMagnetMode; }, [isMagnetMode]);
+  const touchStartPosRef = useRef<{ x: number; y: number; time: number } | null>(null);
 
-  // Optimized engine-based indicator data calculation
+  // Intelligent candle snapping helper for precise mobile touch and desktop drawing
+  const snapToCandle = (x: number, y: number) => {
+    try {
+      const chart = chartRef.current;
+      const series = seriesRef.current;
+      const currentCandles = candlesRef.current;
+      if (!chart || !series || !currentCandles || currentCandles.length === 0) return null;
+
+      const timeScale = chart.timeScale();
+      const time = getTimeFromX(timeScale, x, currentCandles);
+      const price = series.coordinateToPrice(y);
+      if (time === null || price === null) return null;
+
+      const timeNum = typeof time === 'number' ? time : Math.floor(new Date(String(time)).getTime() / 1000);
+
+      // Search nearest candle within visible range
+      let closestCandle = currentCandles[0];
+      let minDiff = Infinity;
+      const startIdx = Math.max(0, currentCandles.length - 400);
+      for (let i = startIdx; i < currentCandles.length; i++) {
+        const c = currentCandles[i];
+        const cTime = typeof c.time === 'number' ? c.time : Math.floor(new Date(String(c.time)).getTime() / 1000);
+        const diff = Math.abs(cTime - timeNum);
+        if (diff < minDiff) {
+          minDiff = diff;
+          closestCandle = c;
+        }
+      }
+
+      if (!closestCandle) return { time, price, x, y };
+
+      const candX = getXFromTime(timeScale, closestCandle.time, currentCandles);
+      const levels = [closestCandle.high, closestCandle.low, closestCandle.open, closestCandle.close];
+      
+      let bestPrice = levels[0];
+      let minPriceDist = Infinity;
+      levels.forEach(lvl => {
+        const coordY = series.priceToCoordinate(lvl);
+        if (coordY !== null) {
+          const dist = Math.abs(coordY - y);
+          if (dist < minPriceDist) {
+            minPriceDist = dist;
+            bestPrice = lvl;
+          }
+        }
+      });
+
+      const snappedX = candX !== null ? candX : x;
+      const snappedY = series.priceToCoordinate(bestPrice) ?? y;
+
+      return {
+        time: closestCandle.time,
+        price: bestPrice,
+        x: snappedX,
+        y: snappedY
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  // Optimized engine-based indicator data calculation with incremental caching
   const indicatorData = useMemo(() => {
+    const candlesToUse = displayCandles.length > 1500 ? displayCandles.slice(-1500) : displayCandles;
     return activeIndicators
       .filter(indicator => !hiddenIndicators.includes(indicator.id))
-      .map(indicator => runPineEngine(indicator, displayCandles, effectiveTimeframe));
+      .map(indicator => indicatorEngine.calculateForIndicator(indicator, candlesToUse, effectiveTimeframe));
   }, [activeIndicators, hiddenIndicators, displayCandles, effectiveTimeframe]);
 
   const indicatorDataRef = useRef(indicatorData);
@@ -773,11 +832,13 @@ export const TradingChart: React.FC<TradingChartProps> = ({
           let x1 = getXFromTime(timeScale, zone.start, currentCandles);
           let x2 = getXFromTime(timeScale, zone.end || (lastCandle?.time || Date.now()/1000), currentCandles);
           if (x1 === null && x2 !== null) x1 = 0;
-          if (x1 !== null && x2 === null) x2 = lastCandleX !== null ? lastCandleX : width;
-          if (lastCandleX !== null && x2 !== null && x2 > lastCandleX + 6) x2 = lastCandleX + 6;
+          if (x1 !== null && x2 === null) x2 = lastCandleX !== null ? lastCandleX + 8 : width;
+          if (lastCandleX !== null && x2 !== null && x2 >= lastCandleX - 4) x2 = lastCandleX + 8;
           if (x1 !== null && x2 !== null) {
+            const bx = Math.min(x1, x2);
+            const bw = Math.max(Math.abs(x2 - x1), 8);
             ctx.fillStyle = zone.color;
-            ctx.fillRect(x1, 0, Math.max(0, x2 - x1), height);
+            ctx.fillRect(bx, 0, bw, height);
           }
         });
         ctx.restore();
@@ -1301,8 +1362,13 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               if (x1 !== null && x2 !== null) {
                 if ((x1 < -100 && x2 < -100) || (x1 > width + 100 && x2 > width + 100)) return;
 
-                const bx = Math.min(x1, x2);
-                const bw = Math.max(Math.abs(x2 - x1), 4);
+                let rightX = Math.max(x1, x2);
+                let leftX = Math.min(x1, x2);
+                if (lastCandleX !== null && rightX >= lastCandleX - 4) {
+                  rightX = lastCandleX + 8;
+                }
+                const bx = leftX;
+                const bw = Math.max(rightX - leftX, 8);
                 const by = 0;
                 const bh = height;
 
@@ -1639,10 +1705,138 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             ctx.restore();
           }
         }
+
+        // 1.10 Render Indicator Tables & Smart Panels (Hidden on mobile / small screen view to prevent blocking chart and indicator overlays)
+        if (data.tables && data.tables.length > 0 && width >= 640 && (typeof window === 'undefined' || window.innerWidth >= 640)) {
+          data.tables.forEach(table => {
+            if (!table.rows || table.rows.length === 0) return;
+            ctx.save();
+            
+            const isTiny = table.size === 'tiny';
+            const isLarge = table.size === 'large';
+            const scale = isTiny ? 0.85 : isLarge ? 1.15 : 1.0;
+
+            const rowH = 22 * scale;
+            const paddingX = 10 * scale;
+            const paddingY = 8 * scale;
+            
+            const col0W = 38 * scale;
+            const col1W = 152 * scale;
+            const col2W = 92 * scale;
+            const cardW = col0W + col1W + col2W + paddingX * 2;
+            const cardH = table.rows.length * rowH + paddingY * 2;
+
+            let cardX = width - cardW - 65;
+            let cardY = height - cardH - 35;
+
+            const pos = (table.position || 'bottom_right').toLowerCase();
+            if (pos.includes('top') && pos.includes('right')) {
+              cardX = width - cardW - 65;
+              cardY = 48;
+            } else if (pos.includes('top') && pos.includes('left')) {
+              cardX = 16;
+              cardY = 48;
+            } else if (pos.includes('bottom') && pos.includes('left')) {
+              cardX = 16;
+              cardY = height - cardH - 35;
+            } else if (pos.includes('top') && pos.includes('center')) {
+              cardX = (width - cardW) / 2;
+              cardY = 48;
+            } else if (pos.includes('bottom') && pos.includes('center')) {
+              cardX = (width - cardW) / 2;
+              cardY = height - cardH - 35;
+            } else if (pos.includes('middle') && pos.includes('right')) {
+              cardX = width - cardW - 65;
+              cardY = (height - cardH) / 2;
+            } else if (pos.includes('middle') && pos.includes('center')) {
+              cardX = (width - cardW) / 2;
+              cardY = (height - cardH) / 2;
+            }
+
+            // Outer Card Background (Glassmorphic dark / light)
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+            ctx.shadowBlur = 10;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 4;
+
+            ctx.fillStyle = isDark ? 'rgba(19, 23, 34, 0.92)' : 'rgba(255, 255, 255, 0.96)';
+            ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.14)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.roundRect(cardX, cardY, cardW, cardH, 6);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.shadowColor = 'transparent';
+
+            // Render Rows
+            table.rows.forEach((row, rIdx) => {
+              const y = cardY + paddingY + rIdx * rowH;
+              const isHeader = rIdx === 0;
+
+              if (isHeader) {
+                ctx.fillStyle = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.04)';
+                ctx.beginPath();
+                ctx.roundRect(cardX + 2, y, cardW - 4, rowH - 2, 4);
+                ctx.fill();
+              } else if (rIdx < table.rows.length - 1) {
+                ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.04)';
+                ctx.lineWidth = 0.8;
+                ctx.beginPath();
+                ctx.moveTo(cardX + paddingX, y + rowH - 1);
+                ctx.lineTo(cardX + cardW - paddingX, y + rowH - 1);
+                ctx.stroke();
+              }
+
+              // Column 0: Badge
+              const cell0 = row[0];
+              if (cell0 && cell0.text) {
+                const c0X = cardX + paddingX;
+                const c0Y = y + 2;
+                const badgeW = col0W - 6;
+                const badgeH = rowH - 5;
+
+                if (cell0.bgColor) {
+                  ctx.fillStyle = cell0.bgColor;
+                  ctx.beginPath();
+                  ctx.roundRect(c0X, c0Y, badgeW, badgeH, 3);
+                  ctx.fill();
+                }
+
+                ctx.font = cell0.bold ? `bold ${10 * scale}px "JetBrains Mono", monospace` : `${10 * scale}px "JetBrains Mono", monospace`;
+                ctx.fillStyle = cell0.color || (isDark ? '#e2e8f0' : '#1e293b');
+                ctx.textAlign = 'center';
+                ctx.fillText(cell0.text, c0X + badgeW / 2, c0Y + badgeH / 2 + 3.5 * scale);
+              }
+
+              // Column 1: Metric Label
+              const cell1 = row[1];
+              if (cell1 && cell1.text) {
+                const c1X = cardX + paddingX + col0W;
+                ctx.font = cell1.bold ? `bold ${11 * scale}px Inter, sans-serif` : `${10.5 * scale}px Inter, sans-serif`;
+                ctx.fillStyle = cell1.color || (isDark ? '#cbd5e1' : '#334155');
+                ctx.textAlign = (cell1.align as CanvasTextAlign) || 'left';
+                ctx.fillText(cell1.text, c1X, y + rowH / 2 + 3.5 * scale);
+              }
+
+              // Column 2: Value
+              const cell2 = row[2];
+              if (cell2 && cell2.text) {
+                const c2X = cardX + cardW - paddingX;
+                ctx.font = cell2.bold ? `bold ${11 * scale}px "JetBrains Mono", monospace` : `${10.5 * scale}px "JetBrains Mono", monospace`;
+                ctx.fillStyle = cell2.color || (isDark ? '#f8fafc' : '#0f172a');
+                ctx.textAlign = 'right';
+                ctx.fillText(cell2.text, c2X, y + rowH / 2 + 3.5 * scale);
+              }
+            });
+
+            ctx.restore();
+          });
+        }
       });
 
       // 2. Render Drawings
-      const currentDrawings = drawingsRef.current.filter(d => !d.symbol || d.symbol === symbolRef.current || d.symbol === (symbolRef.current || ''));
+      const currentDrawings = isHideAllDrawings ? [] : drawingsRef.current.filter(d => !d.symbol || d.symbol === symbolRef.current || d.symbol === (symbolRef.current || ''));
       currentDrawings.forEach(drawing => {
         if (drawing.hidden) return;
         const isSelected = drawing.id === currentSelectedId;
@@ -1732,13 +1926,31 @@ export const TradingChart: React.FC<TradingChartProps> = ({
           } else if (drawing.type === 'Ray') {
             const dx = x2 - x1;
             const dy = y2 - y1;
-            ctx.moveTo(x1, y1);
-            ctx.lineTo(x1 + dx * 100, y1 + dy * 100);
+            const len = Math.hypot(dx, dy);
+            if (len > 1e-4) {
+              const maxExtent = Math.max(width, height) * 2;
+              const ux = dx / len;
+              const uy = dy / len;
+              ctx.moveTo(x1, y1);
+              ctx.lineTo(x1 + ux * maxExtent, y1 + uy * maxExtent);
+            } else {
+              ctx.moveTo(x1, y1);
+              ctx.lineTo(x2, y2);
+            }
           } else if (drawing.type === 'Extended line') {
             const dx = x2 - x1;
             const dy = y2 - y1;
-            ctx.moveTo(x1 - dx * 100, y1 - dy * 100);
-            ctx.lineTo(x1 + dx * 100, y1 + dy * 100);
+            const len = Math.hypot(dx, dy);
+            if (len > 1e-4) {
+              const maxExtent = Math.max(width, height) * 2;
+              const ux = dx / len;
+              const uy = dy / len;
+              ctx.moveTo(x1 - ux * maxExtent, y1 - uy * maxExtent);
+              ctx.lineTo(x1 + ux * maxExtent, y1 + uy * maxExtent);
+            } else {
+              ctx.moveTo(x1, y1);
+              ctx.lineTo(x2, y2);
+            }
           } else if (drawing.type === 'Trend angle') {
             ctx.moveTo(x1, y1);
             ctx.lineTo(x2, y2);
@@ -2669,7 +2881,92 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       const isStartEndTool = ['Trendline', 'Ray', 'Extended line', 'Trend angle', 'Fib retracement', 'Info line', 'Regression trend', 'Circle', 'Arrow', 'Gann box', 'Gann fan', 'Fib time zone'].includes(toolRef.current);
       const isBoxTool = ['Rectangle', 'Flat top/bottom', 'Price range', 'Date range', 'Gann box'].includes(toolRef.current);
       
-      if (isStartEndTool) {
+      if (toolRef.current === 'Fib retracement') {
+        // High-fidelity live Fibonacci preview
+        const p1 = startPointRef.current;
+        const p2 = mousePosRef.current;
+        
+        // Base dashed trend line
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.strokeStyle = '#2962ff';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+
+        const previewFibLevels = [
+          { level: 0, color: '#787b86' },
+          { level: 0.236, color: '#f23645' },
+          { level: 0.382, color: '#ff9800' },
+          { level: 0.5, color: '#4caf50' },
+          { level: 0.618, color: '#089981' },
+          { level: 0.786, color: '#2962ff' },
+          { level: 1, color: '#9c27b0' }
+        ];
+
+        const minX = Math.min(p1.x, p2.x);
+        const maxX = Math.max(p1.x, p2.x, minX + 160);
+
+        // Draw level lines and shading
+        for (let i = 0; i < previewFibLevels.length - 1; i++) {
+          const l1 = previewFibLevels[i];
+          const l2 = previewFibLevels[i + 1];
+          const y1 = p1.y + (p2.y - p1.y) * l1.level;
+          const y2 = p1.y + (p2.y - p1.y) * l2.level;
+          ctx.fillStyle = l1.color + '18';
+          ctx.fillRect(minX, Math.min(y1, y2), maxX - minX, Math.abs(y1 - y2));
+        }
+
+        previewFibLevels.forEach(({ level, color }) => {
+          const y = p1.y + (p2.y - p1.y) * level;
+          ctx.beginPath();
+          ctx.setLineDash([2, 2]);
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1;
+          ctx.moveTo(minX, y);
+          ctx.lineTo(maxX, y);
+          ctx.stroke();
+
+          ctx.fillStyle = color;
+          ctx.font = '10px Inter, sans-serif';
+          ctx.fillText(`Fib ${level}`, minX + 4, y - 3);
+        });
+
+        // Anchor handles
+        ctx.setLineDash([]);
+        [p1, p2].forEach(p => {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 5.5, 0, Math.PI * 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = '#2962ff';
+          ctx.stroke();
+        });
+      } else if (toolRef.current === 'Trendline') {
+        // High-fidelity Trendline live preview
+        const p1 = startPointRef.current;
+        const p2 = mousePosRef.current;
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.strokeStyle = '#2962ff';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([3, 3]);
+        ctx.stroke();
+
+        ctx.setLineDash([]);
+        [p1, p2].forEach(p => {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 5.5, 0, Math.PI * 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = '#2962ff';
+          ctx.stroke();
+        });
+      } else if (isStartEndTool) {
         ctx.beginPath();
         ctx.moveTo(startPointRef.current.x, startPointRef.current.y);
         ctx.lineTo(mousePosRef.current.x, mousePosRef.current.y);
@@ -2716,6 +3013,117 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         }
       }
       ctx.restore();
+    }
+
+    // Render TradingView-Style Precise Touch Target Crosshair & Dynamic Anchors
+    const activeTouchTarget = touchCrosshairRef.current?.visible 
+      ? touchCrosshairRef.current 
+      : (toolRef.current && mousePosRef.current ? { x: mousePosRef.current.x, y: mousePosRef.current.y, visible: true } : null);
+
+    if (activeTouchTarget && activeTouchTarget.visible && series && timeScale) {
+      const { x: cx, y: cy } = activeTouchTarget;
+      if (cx >= 0 && cx <= width && cy >= 0 && cy <= height) {
+        ctx.save();
+        
+        // 1. Dotted Crosshair Guidelines across Viewport
+        ctx.strokeStyle = '#2962ff99';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+
+        // Horizontal Line
+        ctx.beginPath();
+        ctx.moveTo(0, cy);
+        ctx.lineTo(width, cy);
+        ctx.stroke();
+
+        // Vertical Line
+        ctx.beginPath();
+        ctx.moveTo(cx, 0);
+        ctx.lineTo(cx, height);
+        ctx.stroke();
+
+        ctx.setLineDash([]);
+
+        // 2. Center Touch Target Ring (TradingView Precise Target Indicator)
+        // Outer soft glow
+        ctx.beginPath();
+        ctx.arc(cx, cy, 11, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(41, 98, 255, 0.2)';
+        ctx.fill();
+
+        // High-contrast primary ring
+        ctx.beginPath();
+        ctx.arc(cx, cy, 7.5, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(41, 98, 255, 0.45)';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#2962ff';
+        ctx.stroke();
+
+        // Center white bullseye dot
+        ctx.beginPath();
+        ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+
+        // 3. Anchor 1 Handle Marker (if Anchor 1 is set)
+        if (startPointRef.current) {
+          const p1 = startPointRef.current;
+          // Outer halo
+          ctx.beginPath();
+          ctx.arc(p1.x, p1.y, 9, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(41, 98, 255, 0.25)';
+          ctx.fill();
+
+          // Anchor 1 Node
+          ctx.beginPath();
+          ctx.arc(p1.x, p1.y, 6, 0, Math.PI * 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = '#2962ff';
+          ctx.stroke();
+
+          // Center blue dot
+          ctx.beginPath();
+          ctx.arc(p1.x, p1.y, 2.5, 0, Math.PI * 2);
+          ctx.fillStyle = '#2962ff';
+          ctx.fill();
+
+          // "P1" Badge
+          ctx.font = 'bold 9.5px Inter, sans-serif';
+          ctx.fillStyle = '#2962ff';
+          ctx.fillText('P1', p1.x + 9, p1.y - 6);
+        }
+
+        // 4. Live Crosshair Axis Badges
+        const curTargetPrice = series.coordinateToPrice(cy);
+        if (curTargetPrice !== null && !isNaN(curTargetPrice)) {
+          const formattedPrice = formatMovingPrice(curTargetPrice, effectiveSymbol);
+          ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, Roboto, sans-serif';
+          const textW = ctx.measureText(formattedPrice).width;
+          const badgeW = Math.max(68, textW + 12);
+          const badgeH = 20;
+          const badgeX = width - badgeW;
+          const badgeY = cy - badgeH / 2;
+
+          ctx.fillStyle = '#2962ff';
+          ctx.beginPath();
+          if (ctx.roundRect) {
+            ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 2);
+          } else {
+            ctx.rect(badgeX, badgeY, badgeW, badgeH);
+          }
+          ctx.fill();
+
+          ctx.fillStyle = '#ffffff';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(formattedPrice, badgeX + badgeW / 2, badgeY + badgeH / 2);
+        }
+
+        ctx.restore();
+      }
     }
 
     // Render Real-Time Moving Price & Countdown Badge on Price Axis (stacked layout)
@@ -2949,7 +3357,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         horzLines: { color: isDark ? '#2a2e39' : '#f0f3fa' },
       },
       crosshair: {
-        mode: 0,
+        mode: CrosshairMode.Normal,
         vertLine: {
           width: 1,
           color: isDark ? '#758696' : '#758696',
@@ -2972,6 +3380,9 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         rightOffset: 15,
         barSpacing: 6,
       },
+      localization: {
+        priceFormatter: (price: number) => formatSymbolPrice(price, activeSymbol),
+      },
       handleScroll: true,
       handleScale: true,
     });
@@ -2981,7 +3392,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     seriesRef.current = initialSeries;
     currentSeriesTypeRef.current = chartType;
 
-    const formattedData = formatSeriesData(candles, chartType);
+    // Set data in optimized batch (last 1000 candles) for fast rendering
+    const formattedData = formatSeriesData(candles.length > 1000 ? candles.slice(-1000) : candles, chartType);
     initialSeries.setData(formattedData as any);
     
     chartRef.current = chart;
@@ -3214,7 +3626,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       if (!chart || !series || !drawing || !drawing.data) return null;
 
       const timeScale = chart.timeScale();
-      const handleRadius = 14; // generous hit-test radius for easy clicking/dragging
+      const isTouch = typeof window !== 'undefined' && ('ontouchstart' in window || (navigator && navigator.maxTouchPoints > 0));
+      const handleRadius = isTouch ? 24 : 14; // Expanded hit-test radius for easy touch interaction
 
       const isStartEnd = ['Trendline', 'Ray', 'Extended line', 'Trend angle', 'Info line', 'Fib retracement', 'Arrow', 'Regression trend', 'Circle', 'Gann fan', 'Fib time zone'].includes(drawing.type);
       const isBox = ['Rectangle', 'Price range', 'Date range', 'Flat top/bottom', 'Gann box'].includes(drawing.type);
@@ -3311,7 +3724,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       if (!chart || !series) return null;
 
       const timeScale = chart.timeScale();
-      const threshold = 15; // Increased threshold for easier selection
+      const isTouch = typeof window !== 'undefined' && ('ontouchstart' in window || (navigator && navigator.maxTouchPoints > 0));
+      const threshold = isTouch ? 24 : 15; // Increased threshold for easier touch selection
 
       return drawingsRef.current.find(d => {
         if (d.symbol !== symbolRef.current) return false;
@@ -3347,11 +3761,21 @@ export const TradingChart: React.FC<TradingChartProps> = ({
           } else if (d.type === 'Ray') {
             const dx = x2 - x1;
             const dy = y2 - y1;
-            return getDistToSegment(x, y, x1, y1, x1 + dx * 100, y1 + dy * 100) < threshold;
+            const len = Math.hypot(dx, dy);
+            if (len < 1e-4) return false;
+            const maxExtent = 4000;
+            const ux = dx / len;
+            const uy = dy / len;
+            return getDistToSegment(x, y, x1, y1, x1 + ux * maxExtent, y1 + uy * maxExtent) < threshold;
           } else if (d.type === 'Extended line') {
             const dx = x2 - x1;
             const dy = y2 - y1;
-            return getDistToSegment(x, y, x1 - dx * 100, y1 - dy * 100, x1 + dx * 100, y1 + dy * 100) < threshold;
+            const len = Math.hypot(dx, dy);
+            if (len < 1e-4) return false;
+            const maxExtent = 4000;
+            const ux = dx / len;
+            const uy = dy / len;
+            return getDistToSegment(x, y, x1 - ux * maxExtent, y1 - uy * maxExtent, x1 + ux * maxExtent, y1 + uy * maxExtent) < threshold;
           }
         }
         if (d.type === 'Rectangle' || d.type === 'Price range' || d.type === 'Date range' || d.type === 'Flat top/bottom' || d.type === 'Gann box') {
@@ -3506,6 +3930,11 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     }
 
     if (!activeTool) {
+      if (isLockAllDrawings || isHideAllDrawings) {
+        if (selectedDrawingId) setSelectedDrawing(null);
+        return;
+      }
+
       // 1. First priority: Check if user clicked directly on a handle of the currently selected drawing
       const curSelected = selectedDrawingIdRef.current 
         ? drawingsRef.current.find(d => d.id === selectedDrawingIdRef.current && d.symbol === symbolRef.current) 
@@ -3566,11 +3995,32 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     }
     
     if (!chartRef.current || !seriesRef.current) return;
-    const time = chartRef.current.timeScale().coordinateToTime(x);
+    const time = getTimeFromX(chartRef.current.timeScale(), x, candlesRef.current);
     const price = seriesRef.current.coordinateToPrice(y);
 
     if (time === null || price === null) return;    const is3PointTool = activeTool === 'Parallel channel' || activeTool === 'Pitchfork' || activeTool === 'Disjoint channel' || activeTool === 'Triangle' || activeTool === 'Trend-based fib extension' || activeTool === 'Fib channel';
     const is2PointTool = ['Trendline', 'Rectangle', 'Fib retracement', 'Ray', 'Extended line', 'Trend angle', 'Info line', 'Regression trend', 'Flat top/bottom', 'Circle', 'Price range', 'Date range', 'Arrow', 'Gann box', 'Gann fan', 'Fib time zone'].includes(activeTool || '');
+
+    if (activeTool === 'Zoom') {
+      if (!startPoint) {
+        setStartPoint({ time: time as number, price, x, y });
+      } else {
+        if (chartRef.current) {
+          const t1 = Math.min(startPoint.time, time as number);
+          const t2 = Math.max(startPoint.time, time as number);
+          try {
+            chartRef.current.timeScale().setVisibleRange({ from: t1 as any, to: t2 as any });
+          } catch (err) {
+            console.warn('Zoom range error:', err);
+          }
+        }
+        setStartPoint(null);
+        if (!isStayInDrawingMode) {
+          setActiveTool(null);
+        }
+      }
+      return;
+    }
 
     if (activeTool === 'Horizontal line') {
       const id = Math.random().toString(36).substr(2, 9);
@@ -3582,13 +4032,13 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       });
       setSelectedDrawing(id);
       setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
-      setActiveTool(null);
+      if (!isStayInDrawingMode) setActiveTool(null);
     } else if (activeTool === 'Horizontal ray') {
       const id = Math.random().toString(36).substr(2, 9);
       addDrawing({ id, symbol: effectiveSymbol, type: 'Horizontal ray', data: { time, price } });
       setSelectedDrawing(id);
       setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
-      setActiveTool(null);
+      if (!isStayInDrawingMode) setActiveTool(null);
     } else if (activeTool === 'Vertical line') {
       const id = Math.random().toString(36).substr(2, 9);
       addDrawing({
@@ -3599,13 +4049,13 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       });
       setSelectedDrawing(id);
       setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
-      setActiveTool(null);
+      if (!isStayInDrawingMode) setActiveTool(null);
     } else if (activeTool === 'Cross line') {
       const id = Math.random().toString(36).substr(2, 9);
       addDrawing({ id, symbol: effectiveSymbol, type: 'Cross line', data: { time, price } });
       setSelectedDrawing(id);
       setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
-      setActiveTool(null);
+      if (!isStayInDrawingMode) setActiveTool(null);
     } else if (activeTool === 'Long position' || activeTool === 'Short position') {
       const id = Math.random().toString(36).substr(2, 9);
       const isLong = activeTool === 'Long position';
@@ -3646,7 +4096,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       });
       setSelectedDrawing(id);
       setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
-      setActiveTool(null);
+      if (!isStayInDrawingMode) setActiveTool(null);
     } else if (is3PointTool) {
       if (!startPoint) {
         setStartPoint({ time: time as number, price, x, y });
@@ -3668,7 +4118,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
         setStartPoint(null);
         setMiddlePoint(null);
-        setActiveTool(null);
+        if (!isStayInDrawingMode) setActiveTool(null);
       }
     } else if (is2PointTool) {
       if (!startPoint) {
@@ -3687,7 +4137,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         setSelectedDrawing(id);
         setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
         setStartPoint(null);
-        setActiveTool(null);
+        if (!isStayInDrawingMode) setActiveTool(null);
       }
     } else if (activeTool?.startsWith('emoji')) {
       const emoji = activeTool.split('-')[1];
@@ -3700,7 +4150,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       });
       setSelectedDrawing(id);
       setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
-      setActiveTool(null);
+      if (!isStayInDrawingMode) setActiveTool(null);
     } else if (activeTool === 'Text') {
       const text = prompt('Enter text:');
       if (text) {
@@ -3714,7 +4164,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         setSelectedDrawing(id);
         setToolbarPos({ x: e.clientX, y: e.clientY - 60 });
       }
-      setActiveTool(null);
+      if (!isStayInDrawingMode) setActiveTool(null);
     }
   };
 
@@ -3792,15 +4242,15 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         if (['Long position', 'Short position'].includes(drawing.type)) {
           updateDrawing(drawing.id, {
             data: {
-              ...drawing.data,
-              entry: { ...drawing.data.entry, time: currentTime }
+              ...dragOffset.initialData,
+              entry: { ...(dragOffset.initialData?.entry || {}), time: currentTime }
             }
           }, true);
           return;
         } else if (['Trendline', 'Ray', 'Extended line', 'Trend angle', 'Info line', 'Fib retracement', 'Arrow', 'Regression trend', 'Circle', 'Gann fan', 'Fib time zone'].includes(drawing.type)) {
           updateDrawing(drawing.id, {
             data: {
-              ...drawing.data,
+              ...dragOffset.initialData,
               start: { time: currentTime, price: currentPrice }
             }
           }, true);
@@ -3808,7 +4258,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         } else if (['Rectangle', 'Price range', 'Date range', 'Flat top/bottom', 'Gann box'].includes(drawing.type)) {
           updateDrawing(drawing.id, {
             data: {
-              ...drawing.data,
+              ...dragOffset.initialData,
               start: { time: currentTime, price: currentPrice }
             }
           }, true);
@@ -3816,7 +4266,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         } else if (drawing.type === 'Horizontal ray' || drawing.type === 'Cross line') {
           updateDrawing(drawing.id, {
             data: {
-              ...drawing.data,
+              ...dragOffset.initialData,
               time: currentTime,
               price: currentPrice
             }
@@ -3827,7 +4277,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         if (['Trendline', 'Ray', 'Extended line', 'Trend angle', 'Info line', 'Fib retracement', 'Arrow', 'Regression trend', 'Circle', 'Gann fan', 'Fib time zone'].includes(drawing.type)) {
           updateDrawing(drawing.id, {
             data: {
-              ...drawing.data,
+              ...dragOffset.initialData,
               end: { time: currentTime, price: currentPrice }
             }
           }, true);
@@ -3835,7 +4285,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         } else if (['Rectangle', 'Price range', 'Date range', 'Flat top/bottom', 'Gann box'].includes(drawing.type)) {
           updateDrawing(drawing.id, {
             data: {
-              ...drawing.data,
+              ...dragOffset.initialData,
               end: { time: currentTime, price: currentPrice }
             }
           }, true);
@@ -3843,7 +4293,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         } else if (['Long position', 'Short position'].includes(drawing.type)) {
           updateDrawing(drawing.id, {
             data: {
-              ...drawing.data,
+              ...dragOffset.initialData,
               end: { time: currentTime }
             }
           }, true);
@@ -3853,9 +4303,9 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         if (['Rectangle', 'Price range', 'Date range', 'Flat top/bottom', 'Gann box'].includes(drawing.type)) {
           updateDrawing(drawing.id, {
             data: {
-              ...drawing.data,
-              start: { time: drawing.data.start.time, price: currentPrice },
-              end: { time: currentTime, price: drawing.data.end.price }
+              ...dragOffset.initialData,
+              start: { time: dragOffset.initialData.start.time, price: currentPrice },
+              end: { time: currentTime, price: dragOffset.initialData.end.price }
             }
           }, true);
           return;
@@ -3864,9 +4314,9 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         if (['Rectangle', 'Price range', 'Date range', 'Flat top/bottom', 'Gann box'].includes(drawing.type)) {
           updateDrawing(drawing.id, {
             data: {
-              ...drawing.data,
-              start: { time: currentTime, price: drawing.data.start.price },
-              end: { time: drawing.data.end.time, price: currentPrice }
+              ...dragOffset.initialData,
+              start: { time: currentTime, price: dragOffset.initialData.start.price },
+              end: { time: dragOffset.initialData.end.time, price: currentPrice }
             }
           }, true);
           return;
@@ -3874,7 +4324,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       } else if (handle === 'p1') {
         updateDrawing(drawing.id, {
           data: {
-            ...drawing.data,
+            ...dragOffset.initialData,
             p1: { time: currentTime, price: currentPrice }
           }
         }, true);
@@ -3882,7 +4332,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       } else if (handle === 'p2') {
         updateDrawing(drawing.id, {
           data: {
-            ...drawing.data,
+            ...dragOffset.initialData,
             p2: { time: currentTime, price: currentPrice }
           }
         }, true);
@@ -3890,7 +4340,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       } else if (handle === 'p3') {
         updateDrawing(drawing.id, {
           data: {
-            ...drawing.data,
+            ...dragOffset.initialData,
             p3: { time: currentTime, price: currentPrice }
           }
         }, true);
@@ -3898,7 +4348,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       } else if (handle === 'tp') {
         updateDrawing(drawing.id, {
           data: {
-            ...drawing.data,
+            ...dragOffset.initialData,
             tp: { price: currentPrice }
           }
         }, true);
@@ -3906,7 +4356,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       } else if (handle === 'sl') {
         updateDrawing(drawing.id, {
           data: {
-            ...drawing.data,
+            ...dragOffset.initialData,
             sl: { price: currentPrice }
           }
         }, true);
@@ -3916,8 +4366,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         const pDelta = currentPrice - initEntryPrice;
         updateDrawing(drawing.id, {
           data: {
-            ...drawing.data,
-            entry: { ...drawing.data.entry, price: currentPrice },
+            ...dragOffset.initialData,
+            entry: { ...(dragOffset.initialData?.entry || {}), price: currentPrice },
             tp: { price: (dragOffset.initialData?.tp?.price ?? currentPrice) + pDelta },
             sl: { price: (dragOffset.initialData?.sl?.price ?? currentPrice) + pDelta }
           }
@@ -4022,6 +4472,368 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     toolbarDragStartRef.current = null;
   };
 
+  // TradingView Touch Offset Constant (Target floats 40px above thumb so thumb never obscures crosshair/candle)
+  const TOUCH_OFFSET_Y = 40;
+
+  // Confirm Point at Coordinate (Used for Anchor Tap, Touch End, and Floating Banner Confirm Button)
+  const confirmDrawingPoint = useCallback((targetX: number, targetY: number) => {
+    if (!activeTool) return;
+    const rect = chartContainerRef.current?.getBoundingClientRect();
+    if (!rect || !chartRef.current || !seriesRef.current) return;
+
+    let targetTime: any = null;
+    let targetPrice: any = null;
+    let finalX = targetX;
+    let finalY = targetY;
+
+    if (isMagnetModeRef.current) {
+      const snapped = snapToCandle(targetX, targetY);
+      if (snapped) {
+        targetTime = snapped.time;
+        targetPrice = snapped.price;
+        finalX = snapped.x;
+        finalY = snapped.y;
+      }
+    }
+
+    if (targetTime === null || targetPrice === null) {
+      targetTime = getTimeFromX(chartRef.current.timeScale(), finalX, candlesRef.current);
+      targetPrice = seriesRef.current.coordinateToPrice(finalY);
+    }
+
+    if (targetTime === null || targetPrice === null) return;
+
+    // 1. Zoom Tool
+    if (activeTool === 'Zoom') {
+      if (!startPointRef.current) {
+        const p1Data = { time: targetTime as number, price: targetPrice, x: finalX, y: finalY };
+        setStartPoint(p1Data);
+        startPointRef.current = p1Data;
+      } else {
+        if (chartRef.current) {
+          const t1 = Math.min(startPointRef.current.time, targetTime as number);
+          const t2 = Math.max(startPointRef.current.time, targetTime as number);
+          try {
+            chartRef.current.timeScale().setVisibleRange({ from: t1 as any, to: t2 as any });
+          } catch (err) {
+            console.warn('Touch zoom range error:', err);
+          }
+        }
+        setStartPoint(null);
+        startPointRef.current = null;
+        if (!isStayInDrawingMode) setActiveTool(null);
+        setTouchCrosshair(null);
+      }
+      return;
+    }
+
+    // 2. Single Point Tools
+    if (activeTool === 'Horizontal line') {
+      const id = Math.random().toString(36).substr(2, 9);
+      addDrawing({
+        id,
+        symbol: effectiveSymbol,
+        type: 'Horizontal line',
+        data: { price: targetPrice }
+      });
+      setSelectedDrawing(id);
+      setToolbarPos({ x: Math.round(rect.width / 2), y: 24 });
+      if (!isStayInDrawingMode) setActiveTool(null);
+      setTouchCrosshair(null);
+      return;
+    }
+    if (activeTool === 'Horizontal ray') {
+      const id = Math.random().toString(36).substr(2, 9);
+      addDrawing({ id, symbol: effectiveSymbol, type: 'Horizontal ray', data: { time: targetTime, price: targetPrice } });
+      setSelectedDrawing(id);
+      setToolbarPos({ x: Math.round(rect.width / 2), y: 24 });
+      if (!isStayInDrawingMode) setActiveTool(null);
+      setTouchCrosshair(null);
+      return;
+    }
+    if (activeTool === 'Vertical line') {
+      const id = Math.random().toString(36).substr(2, 9);
+      addDrawing({ id, symbol: effectiveSymbol, type: 'Vertical line', data: { time: targetTime } });
+      setSelectedDrawing(id);
+      setToolbarPos({ x: Math.round(rect.width / 2), y: 24 });
+      if (!isStayInDrawingMode) setActiveTool(null);
+      setTouchCrosshair(null);
+      return;
+    }
+    if (activeTool === 'Cross line') {
+      const id = Math.random().toString(36).substr(2, 9);
+      addDrawing({ id, symbol: effectiveSymbol, type: 'Cross line', data: { time: targetTime, price: targetPrice } });
+      setSelectedDrawing(id);
+      setToolbarPos({ x: Math.round(rect.width / 2), y: 24 });
+      if (!isStayInDrawingMode) setActiveTool(null);
+      setTouchCrosshair(null);
+      return;
+    }
+    if (activeTool === 'Long position' || activeTool === 'Short position') {
+      const id = Math.random().toString(36).substr(2, 9);
+      const isLong = activeTool === 'Long position';
+      const c = candlesRef.current;
+      let priceDelta = targetPrice * 0.006;
+      if (c && c.length > 0) {
+        const sample = c.slice(-20);
+        const avg = sample.reduce((acc, cand) => acc + Math.abs(cand.high - cand.low), 0) / sample.length;
+        if (avg > 0) priceDelta = avg * 4;
+      }
+      let endTime = (targetTime as number) + 3600 * 20;
+      if (c && c.length >= 2) {
+        const cLastTime = typeof c[c.length - 1].time === 'number' ? (c[c.length - 1].time as number) : Math.floor(new Date(String(c[c.length - 1].time)).getTime() / 1000);
+        const cPrevTime = typeof c[c.length - 2].time === 'number' ? (c[c.length - 2].time as number) : Math.floor(new Date(String(c[c.length - 2].time)).getTime() / 1000);
+        const barInterval = Math.max(1, Math.abs(cLastTime - cPrevTime));
+        endTime = (targetTime as number) + barInterval * 20;
+      }
+      addDrawing({
+        id,
+        symbol: effectiveSymbol,
+        type: activeTool,
+        data: {
+          entry: { time: targetTime, price: targetPrice },
+          tp: { price: isLong ? targetPrice + priceDelta * 2 : targetPrice - priceDelta * 2 },
+          sl: { price: isLong ? targetPrice - priceDelta : targetPrice + priceDelta },
+          end: { time: endTime },
+          riskAmount: 750,
+          rewardAmount: 1500,
+          qty: 3
+        }
+      });
+      setSelectedDrawing(id);
+      setToolbarPos({ x: Math.round(rect.width / 2), y: 24 });
+      if (!isStayInDrawingMode) setActiveTool(null);
+      setTouchCrosshair(null);
+      return;
+    }
+
+    // 3. Multi-Point Tools (Point 1 -> Live Preview -> Point 2 / Point 3)
+    if (!startPointRef.current) {
+      // Lock Anchor 1 (P1)
+      const p1Data = { time: targetTime as number, price: targetPrice, x: finalX, y: finalY };
+      setStartPoint(p1Data);
+      startPointRef.current = p1Data;
+    } else {
+      const is3PointTool = activeTool === 'Parallel channel' || activeTool === 'Pitchfork' || activeTool === 'Disjoint channel' || activeTool === 'Triangle' || activeTool === 'Trend-based fib extension' || activeTool === 'Fib channel';
+      const is2PointTool = ['Trendline', 'Rectangle', 'Fib retracement', 'Ray', 'Extended line', 'Trend angle', 'Info line', 'Regression trend', 'Flat top/bottom', 'Circle', 'Price range', 'Date range', 'Arrow', 'Gann box', 'Gann fan', 'Fib time zone'].includes(activeTool || '');
+
+      if (is2PointTool) {
+        const id = Math.random().toString(36).substr(2, 9);
+        addDrawing({
+          id,
+          symbol: effectiveSymbol,
+          type: activeTool,
+          data: {
+            start: { time: startPointRef.current.time, price: startPointRef.current.price },
+            end: { time: targetTime, price: targetPrice }
+          }
+        });
+        setSelectedDrawing(id);
+        setToolbarPos({ x: Math.round(rect.width / 2), y: 24 });
+        setStartPoint(null);
+        startPointRef.current = null;
+        if (!isStayInDrawingMode) setActiveTool(null);
+        setTouchCrosshair(null);
+      } else if (is3PointTool) {
+        if (!middlePoint) {
+          const p2Data = { time: targetTime as number, price: targetPrice, x: finalX, y: finalY };
+          setMiddlePoint(p2Data);
+        } else {
+          const id = Math.random().toString(36).substr(2, 9);
+          addDrawing({
+            id,
+            symbol: effectiveSymbol,
+            type: activeTool,
+            data: {
+              p1: { time: startPointRef.current.time, price: startPointRef.current.price },
+              p2: { time: middlePoint.time, price: middlePoint.price },
+              p3: { time: targetTime, price: targetPrice }
+            }
+          });
+          setSelectedDrawing(id);
+          setToolbarPos({ x: Math.round(rect.width / 2), y: 24 });
+          setStartPoint(null);
+          startPointRef.current = null;
+          setMiddlePoint(null);
+          if (!isStayInDrawingMode) setActiveTool(null);
+          setTouchCrosshair(null);
+        }
+      }
+    }
+  }, [activeTool, effectiveSymbol, middlePoint, addDrawing, setSelectedDrawing, setActiveTool]);
+
+  // Mobile Touch Handlers: Touch Tracking, Anchor Tap, Dynamic Preview, Confirmation Tap
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    const rect = chartContainerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    // Ignore touches on floating toolbars, guide banners, or modals
+    if ((e.target as HTMLElement).closest('.floating-toolbar') || (e.target as HTMLElement).closest('.drawing-settings-modal') || (e.target as HTMLElement).closest('#mobile-drawing-guide-banner')) {
+      return;
+    }
+
+    const rawX = touch.clientX - rect.left;
+    const rawY = touch.clientY - rect.top;
+    
+    // Apply TOUCH_OFFSET_Y so crosshair target floats comfortably above thumb
+    const targetY = Math.max(10, Math.min(rect.height - 10, rawY - TOUCH_OFFSET_Y));
+    const targetX = Math.max(10, Math.min(rect.width - 10, rawX));
+
+    touchStartPosRef.current = { x: targetX, y: targetY, time: Date.now() };
+
+    if (activeTool) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      let finalX = targetX;
+      let finalY = targetY;
+      if (isMagnetMode) {
+        const snapped = snapToCandle(targetX, targetY);
+        if (snapped) {
+          finalX = snapped.x;
+          finalY = snapped.y;
+        }
+      }
+
+      setTouchCrosshair({ x: finalX, y: finalY, visible: true });
+      setMousePos({ x: finalX, y: finalY });
+      return;
+    }
+
+    // Direct selection or dragging on touch
+    const curSelected = selectedDrawingIdRef.current 
+      ? drawingsRef.current.find(d => d.id === selectedDrawingIdRef.current && d.symbol === symbolRef.current) 
+      : null;
+
+    if (curSelected && !curSelected.locked && !curSelected.hidden) {
+      const activeHandle = findHandleAt(targetX, targetY, curSelected);
+      if (activeHandle) {
+        if (!chartRef.current || !seriesRef.current) return;
+        setIsDragging(true);
+        const timeScale = chartRef.current.timeScale();
+        const startPrice = seriesRef.current.coordinateToPrice(targetY);
+        const startTime = getTimeFromX(timeScale, targetX, candlesRef.current);
+        setDragOffset({
+          x: targetX,
+          y: targetY,
+          startTime,
+          startPrice,
+          dragHandle: activeHandle,
+          initialData: JSON.parse(JSON.stringify(curSelected.data))
+        });
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+    }
+
+    const drawing = findDrawingAt(rawX, rawY);
+    if (drawing) {
+      setSelectedDrawing(drawing.id);
+      if (!toolbarPos && rect) {
+        setToolbarPos({ x: Math.round(rect.width / 2), y: 24 });
+      }
+      if (!chartRef.current || !seriesRef.current) return;
+      setIsDragging(true);
+      const handle = findHandleAt(rawX, rawY, drawing);
+      const timeScale = chartRef.current.timeScale();
+      const startPrice = seriesRef.current.coordinateToPrice(rawY);
+      const startTime = getTimeFromX(timeScale, rawX, candlesRef.current);
+      setDragOffset({
+        x: rawX,
+        y: rawY,
+        startTime,
+        startPrice,
+        dragHandle: handle || 'body',
+        initialData: JSON.parse(JSON.stringify(drawing.data))
+      });
+      e.preventDefault();
+      e.stopPropagation();
+    } else if (selectedDrawingId) {
+      setSelectedDrawing(null);
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    const rect = chartContainerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const rawX = touch.clientX - rect.left;
+    const rawY = touch.clientY - rect.top;
+    const targetY = Math.max(10, Math.min(rect.height - 10, rawY - TOUCH_OFFSET_Y));
+    const targetX = Math.max(10, Math.min(rect.width - 10, rawX));
+
+    if (activeTool) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      let finalX = targetX;
+      let finalY = targetY;
+      if (isMagnetMode) {
+        const snapped = snapToCandle(targetX, targetY);
+        if (snapped) {
+          finalX = snapped.x;
+          finalY = snapped.y;
+        }
+      }
+
+      setTouchCrosshair({ x: finalX, y: finalY, visible: true });
+      setMousePos({ x: finalX, y: finalY });
+      return;
+    }
+
+    if (isDragging && selectedDrawingId && dragOffset) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleMouseMove({ clientX: touch.clientX, clientY: touch.clientY - TOUCH_OFFSET_Y } as any);
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    const touchStart = touchStartPosRef.current;
+    touchStartPosRef.current = null;
+
+    if (activeTool && e.changedTouches.length === 1) {
+      const touch = e.changedTouches[0];
+      const rect = chartContainerRef.current?.getBoundingClientRect();
+      if (rect) {
+        const rawX = touch.clientX - rect.left;
+        const rawY = touch.clientY - rect.top;
+        const targetY = Math.max(10, Math.min(rect.height - 10, rawY - TOUCH_OFFSET_Y));
+        const targetX = Math.max(10, Math.min(rect.width - 10, rawX));
+
+        let finalX = targetX;
+        let finalY = targetY;
+        if (isMagnetMode) {
+          const snapped = snapToCandle(targetX, targetY);
+          if (snapped) {
+            finalX = snapped.x;
+            finalY = snapped.y;
+          }
+        }
+
+        // Tap gesture or completion gesture: Confirm anchor point at target crosshair location
+        confirmDrawingPoint(finalX, finalY);
+      }
+      return;
+    }
+
+    if (isDragging) {
+      if (selectedDrawingId) {
+        const cur = drawings.find(d => d.id === selectedDrawingId);
+        if (cur) {
+          updateDrawing(selectedDrawingId, { data: cur.data }, false);
+        }
+      }
+      setIsDragging(false);
+      setDragOffset(null);
+    }
+  };
+
   // Update data when displayCandles change (real-time ticks & incremental updates)
   const prevVersionRef = useRef<number>(-1);
 
@@ -4038,7 +4850,9 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         const currentType = currentSeriesTypeRef.current || chartType;
 
         if (isNewSet || currentType === 'heikin_ashi') {
-          const formatted = formatSeriesData(displayCandles, currentType);
+          const sliceCandles = displayCandles.length > 1500 ? displayCandles.slice(-1500) : displayCandles;
+          candlesRef.current = sliceCandles;
+          const formatted = formatSeriesData(sliceCandles, currentType);
           seriesRef.current.setData(formatted as any);
 
           lastResolvedSymbol.current = symbolKey;
@@ -4053,7 +4867,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             const visibleCount = Math.min(150, totalCandles);
             
             timeScale.setVisibleLogicalRange({
-              from: totalCandles - visibleCount,
+              from: Math.max(0, totalCandles - visibleCount),
               to: totalCandles + 15,
             });
           }
@@ -4075,7 +4889,9 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             try {
               seriesRef.current.update(formattedCandle);
             } catch (updateErr) {
-              const formatted = formatSeriesData(displayCandles, currentType);
+              const sliceCandles = displayCandles.length > 1500 ? displayCandles.slice(-1500) : displayCandles;
+              candlesRef.current = sliceCandles;
+              const formatted = formatSeriesData(sliceCandles, currentType);
               seriesRef.current.setData(formatted as any);
             }
           } else {
@@ -4087,7 +4903,9 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             try {
               seriesRef.current.update(formattedPoint);
             } catch (updateErr) {
-              const formatted = formatSeriesData(displayCandles, currentType);
+              const sliceCandles = displayCandles.length > 1500 ? displayCandles.slice(-1500) : displayCandles;
+              candlesRef.current = sliceCandles;
+              const formatted = formatSeriesData(sliceCandles, currentType);
               seriesRef.current.setData(formatted as any);
             }
           }
@@ -4098,6 +4916,9 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         // Keep price line and drawings updated
         updatePriceLine();
         redrawDrawings();
+        requestAnimationFrame(() => {
+          redrawDrawingsRef.current?.();
+        });
       }
     } catch (e) {
       console.warn('Real-time update error:', e);
@@ -4385,11 +5206,93 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         className="absolute inset-0 z-[5] pointer-events-none"
       />
 
+      {/* Mobile / Desktop Active Drawing Tool Banner & Controls */}
+      {activeTool && (
+        <div 
+          id="mobile-drawing-guide-banner"
+          className="absolute top-2 left-1/2 -translate-x-1/2 z-[70] flex items-center gap-1.5 sm:gap-2 bg-[#1e222d]/95 backdrop-blur-md border border-[#2962ff]/50 text-[#d1d4dc] px-2.5 sm:px-3.5 py-1.5 rounded-full shadow-2xl animate-in slide-in-from-top-2 duration-150 select-none text-xs font-medium max-w-[calc(100vw-24px)]"
+        >
+          <div className="flex items-center gap-1.5 shrink-0 text-[#2962ff] font-semibold">
+            {activeTool === 'Trendline' ? (
+              <Slash className="w-3.5 h-3.5" />
+            ) : activeTool === 'Fib retracement' ? (
+              <AlignJustify className="w-3.5 h-3.5 rotate-90" />
+            ) : (
+              <Pencil className="w-3.5 h-3.5" />
+            )}
+            <span className="truncate max-w-[100px] sm:max-w-none">{activeTool}</span>
+          </div>
+
+          <div className="w-px h-3 bg-[#2a2e39] shrink-0" />
+
+          <span className="text-[#787b86] text-[11px] truncate max-w-[120px] sm:max-w-none">
+            {!startPoint ? "Position & tap point 1" : (!middlePoint && ['Parallel channel', 'Pitchfork', 'Disjoint channel', 'Triangle', 'Trend-based fib extension', 'Fib channel'].includes(activeTool) ? "Position & tap point 2" : "Position & tap to finish")}
+          </span>
+
+          {/* Confirm Target Point Button (TradingView touch confirmation) */}
+          {(touchCrosshair?.visible || mousePos) && (
+            <button
+              id="mobile-drawing-confirm-point-btn"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                const pos = touchCrosshair?.visible ? touchCrosshair : mousePos;
+                if (pos) {
+                  confirmDrawingPoint(pos.x, pos.y);
+                }
+              }}
+              className="flex items-center gap-1 bg-[#2962ff] hover:bg-[#1e4bd8] active:bg-[#193cb8] text-white px-2.5 py-0.5 rounded text-[11px] font-semibold transition-colors cursor-pointer shrink-0 shadow-sm"
+              title="Lock Point at current crosshair position"
+            >
+              <Check className="w-3 h-3" />
+              <span>{!startPoint ? "Set P1" : "Confirm"}</span>
+            </button>
+          )}
+
+          <div className="w-px h-3 bg-[#2a2e39] shrink-0" />
+
+          {/* Magnet Button */}
+          <button
+            id="mobile-drawing-magnet-toggle"
+            type="button"
+            onClick={(e) => { 
+              e.stopPropagation(); 
+              setIsMagnetMode(!isMagnetMode); 
+            }}
+            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold transition-colors cursor-pointer shrink-0 ${isMagnetMode ? 'bg-[#2962ff] text-white shadow-sm' : 'bg-[#2a2e39] text-[#787b86] hover:text-[#d1d4dc]'}`}
+            title="Snap to nearest candle High / Low / Open / Close"
+          >
+            <Magnet className="w-3 h-3" />
+            <span className="text-[10px]">Snap</span>
+          </button>
+
+          {/* Cancel button */}
+          <button
+            id="mobile-drawing-cancel-btn"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setStartPoint(null);
+              setMiddlePoint(null);
+              setActiveTool(null);
+            }}
+            className="p-1 hover:bg-[#2a2e39] active:bg-[#2a2e39] rounded-full text-[#787b86] hover:text-red-400 transition-colors cursor-pointer shrink-0"
+            title="Cancel Drawing"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       <div 
-        className={`absolute inset-0 z-[6] ${(!isHoveringScale || isDragging) && (activeTool || selectedDrawingId || isHoveringDrawing) ? 'pointer-events-auto' : 'pointer-events-none'}`} 
+        className={`absolute inset-0 z-[6] touch-none ${(!isHoveringScale || isDragging) && (activeTool || selectedDrawingId || isHoveringDrawing) ? 'pointer-events-auto' : 'pointer-events-none'}`} 
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
         onDoubleClick={handleDoubleClick}
         style={{ 
           cursor: activeTool 
@@ -4405,13 +5308,14 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       {/* Floating Toolbar for Selected Drawing */}
       {selectedDrawingId && (
         <div 
-          className="absolute z-[100] bg-[#1e222d] border border-[#2a2e39] shadow-2xl rounded-md p-1 flex items-center gap-0.5 animate-in zoom-in-95 duration-100 select-none"
+          className="absolute z-[100] floating-toolbar bg-[#1e222d] border border-[#2a2e39] shadow-2xl rounded-md p-1 flex items-center gap-0.5 animate-in zoom-in-95 duration-100 select-none max-w-[calc(100vw-24px)] overflow-x-auto no-scrollbar"
           style={{ 
             left: '50%', 
             top: '12px',
             transform: 'translateX(-50%)'
           }}
           onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
         >
           {/* Grip Icon (Visual only, no dragging) */}
           <div className="px-1 py-1.5 text-[#787b86] cursor-default flex items-center">
@@ -4707,17 +5611,24 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             </button>
             
             <button 
-              onClick={() => {
-                  // Alert placeholder
+              onClick={(e) => {
+                e.stopPropagation();
+                const drawing = drawings.find(d => d.id === selectedDrawingId);
+                if (drawing) updateDrawing(selectedDrawingId, { hidden: !drawing.hidden });
               }}
-              title="Add alert on drawing"
+              title={drawings.find(d => d.id === selectedDrawingId)?.hidden ? 'Show drawing' : 'Hide drawing'}
               className="w-8 h-8 flex items-center justify-center hover:bg-[#2a2e39] rounded transition-colors group"
             >
-              <Clock className="w-4 h-4 text-[#787b86] group-hover:text-[#d1d4dc]" />
+              {drawings.find(d => d.id === selectedDrawingId)?.hidden ? (
+                <Eye className="w-4 h-4 text-amber-400" />
+              ) : (
+                <EyeOff className="w-4 h-4 text-[#787b86] group-hover:text-[#d1d4dc]" />
+              )}
             </button>
 
             <button 
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
                 const drawing = drawings.find(d => d.id === selectedDrawingId);
                 if (drawing) updateDrawing(selectedDrawingId, { locked: !drawing.locked });
               }}
@@ -4744,8 +5655,16 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               <Trash2 className="w-4 h-4 text-[#787b86] group-hover:text-red-400" />
             </button>
             
-            <button className="w-8 h-8 flex items-center justify-center hover:bg-[#2a2e39] rounded transition-colors group" title="More">
-              <MoreHorizontal className="w-4 h-4 text-[#787b86] group-hover:text-[#d1d4dc]" />
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedDrawing(null);
+                setToolbarPos(null);
+              }}
+              title="Close Toolbar"
+              className="w-8 h-8 flex items-center justify-center hover:bg-[#2a2e39] rounded transition-colors group"
+            >
+              <X className="w-4 h-4 text-[#787b86] group-hover:text-[#d1d4dc]" />
             </button>
           </div>
         </div>
@@ -4785,105 +5704,155 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             )}
           </div>
           
-          {/* Indicators List Overlay */}
-          <div className="flex flex-col gap-0 mt-1 pointer-events-auto">
-            {activeIndicators.map(indicator => {
-              const hidden = hiddenIndicators.includes(indicator.id);
-              const data = indicatorData.find(d => d.id === indicator.id);
-              
-              return (
-                <div 
-                  key={indicator.id} 
-                  className="flex items-center gap-1.5 group/ind px-1 py-0.5 rounded hover:bg-tv-hover/30 transition-colors max-w-fit"
+          {/* Indicators List Overlay (Collapsible like TradingView) */}
+          {activeIndicators.length > 0 && (
+            <div className="mt-1 pointer-events-auto">
+              {isIndicatorsLegendCollapsed ? (
+                <button
+                  id="expand-indicators-legend-btn"
+                  onClick={() => {
+                    setIsIndicatorsLegendCollapsed(false);
+                    try {
+                      localStorage.setItem('tv_indicators_legend_collapsed', 'false');
+                    } catch (e) {}
+                  }}
+                  className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-tv-card/85 hover:bg-tv-hover text-tv-muted hover:text-tv-text border border-tv-border/50 shadow-xs text-[11px] font-mono font-medium transition-colors cursor-pointer select-none group/collapse"
+                  title="Show indicator names and values"
                 >
-                  <div className="flex items-center gap-1 cursor-default">
-                    <span className={`text-[12px] font-medium transition-colors ${hidden ? 'text-tv-muted' : 'text-tv-text'}`}>
-                      {indicator.name}
-                    </span>
-                    {!hidden && indicator.id.toLowerCase().includes('session') && (
-                      <div className="flex items-center gap-1.5 text-[10.5px] font-mono select-none">
-                        <span className="flex items-center gap-1 font-medium" style={{ color: indicator.params?.london_color || '#26a69a' }}>
-                          <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ backgroundColor: indicator.params?.london_color || '#26a69a' }} />
-                          {(indicator.params?.london_start || '03:00').replace(':', '')}-{(indicator.params?.london_end || '12:00').replace(':', '')}:1234567
-                        </span>
-                        <span className="flex items-center gap-1 font-medium" style={{ color: indicator.params?.ny_color || '#f59e0b' }}>
-                          <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ backgroundColor: indicator.params?.ny_color || '#f59e0b' }} />
-                          {(indicator.params?.ny_start || '08:00').replace(':', '')}-{(indicator.params?.ny_end || '17:00').replace(':', '')}:1234567
-                        </span>
-                        <span className="flex items-center gap-1 font-medium" style={{ color: indicator.params?.tokyo_color || '#00b4d8' }}>
-                          <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ backgroundColor: indicator.params?.tokyo_color || '#00b4d8' }} />
-                          {(indicator.params?.tokyo_start || '20:00').replace(':', '')}-{(indicator.params?.tokyo_end || '04:00').replace(':', '')}:1234567
-                        </span>
-                        <span className="flex items-center gap-1 font-medium" style={{ color: indicator.params?.sydney_color || '#ef5350' }}>
-                          <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ backgroundColor: indicator.params?.sydney_color || '#ef5350' }} />
-                          {(indicator.params?.sydney_start || '17:00').replace(':', '')}-{(indicator.params?.sydney_end || '02:00').replace(':', '')}:1234567
-                        </span>
-                      </div>
-                    )}
-                    {!hidden && data && !indicator.id.toLowerCase().includes('session') && (
-                      data.name.toLowerCase().includes('delta') && data.deltaData && data.deltaData.length > 0 ? (
-                        <span className="text-[11px] font-mono font-medium text-[#26a69a]">
-                          {data.deltaData[data.deltaData.length - 1].delta >= 0 ? '+' : ''}{data.deltaData[data.deltaData.length - 1].delta} (CVD: {data.deltaData[data.deltaData.length - 1].cvd})
-                        </span>
-                      ) : (
-                        data.plots.map((plot, pIdx) => {
-                          const lastPoint = plot[plot.length - 1];
-                          if (!lastPoint) return null;
-                          const isVol = data.name.toLowerCase() === 'volume';
-                          const formatVal = (v: number | null) => {
-                            if (v === null || isNaN(v)) return '';
-                            if (isVol) {
-                              if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
-                              if (v >= 1e3) return `${(v / 1e3).toFixed(2)}K`;
-                              return `${Math.round(v)}`;
-                            }
-                            return data.overlay ? formatSymbolPrice(v, activeSymbol) : v.toFixed(2);
-                          };
-                          return (
-                            <span key={pIdx} className="text-[11px] font-mono font-medium" style={{ color: lastPoint.color }}>
-                              {formatVal(lastPoint.value)}
-                            </span>
-                          );
-                        })
-                      )
-                    )}
-                  </div>
-                  
-                  <div className="flex items-center gap-0.5 opacity-0 group-hover/ind:opacity-100 transition-opacity">
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); toggleIndicatorVisibility(indicator.id); }}
-                      className="p-1 hover:bg-tv-hover rounded text-tv-muted hover:text-tv-text transition-colors"
-                      title={hidden ? "Show" : "Hide"}
-                    >
-                      {hidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                    </button>
-                    <button 
-                      onClick={(e) => { 
-                        e.stopPropagation(); 
-                        const ind = activeIndicators.find(i => i.id === indicator.id);
-                        if (ind) {
-                          const lenMatch = ind.code.match(/(?:len|length|hma_len|atr_len)\s*=\s*input\.(?:int|float)\(\s*(\d+)/i) || ind.code.match(/(?:sma|hma|rsi|atr)\s*\([^,]+,\s*(\d+)\)/i);
-                          setIndicatorParamLength(lenMatch ? parseInt(lenMatch[1], 10) : 20);
-                        }
-                        setSelectedIndicatorForSettings(indicator.id); 
+                  <ChevronDown className="w-3.5 h-3.5 text-tv-muted group-hover/collapse:text-tv-text transition-colors" />
+                  <span className="font-semibold">{activeIndicators.length}</span>
+                </button>
+              ) : (
+                <div className="flex flex-col gap-0">
+                  {/* Top Collapse Button */}
+                  <div className="flex items-center mb-0.5">
+                    <button
+                      id="collapse-indicators-legend-btn"
+                      onClick={() => {
+                        setIsIndicatorsLegendCollapsed(true);
+                        try {
+                          localStorage.setItem('tv_indicators_legend_collapsed', 'true');
+                        } catch (e) {}
                       }}
-                      className="p-1 hover:bg-tv-hover rounded text-tv-muted hover:text-tv-text transition-colors"
-                      title="Settings"
+                      className="p-1 sm:p-0.5 hover:bg-tv-hover active:bg-tv-hover rounded text-tv-muted hover:text-tv-text transition-colors cursor-pointer touch-manipulation"
+                      title="Hide all indicator names"
+                      aria-label="Hide all indicator names"
                     >
-                      <Settings className="w-3.5 h-3.5" />
-                    </button>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); removeIndicator(indicator.id); }}
-                      className="p-1 hover:bg-tv-hover rounded text-tv-muted hover:text-red-500 transition-colors"
-                      title="Remove"
-                    >
-                      <X className="w-3.5 h-3.5" />
+                      <ChevronUp className="w-3.5 h-3.5" />
                     </button>
                   </div>
+
+                  {activeIndicators.map(indicator => {
+                    const hidden = hiddenIndicators.includes(indicator.id);
+                    const data = indicatorData.find(d => d.id === indicator.id);
+                    
+                    return (
+                      <div 
+                        key={indicator.id} 
+                        id={`indicator-legend-${indicator.id}`}
+                        className="flex items-center gap-1.5 group/ind px-1.5 py-0.5 md:px-1 rounded hover:bg-tv-hover/30 transition-colors max-w-full sm:max-w-fit flex-wrap sm:flex-nowrap"
+                      >
+                        <div className="flex items-center gap-1 cursor-default min-w-0">
+                          <span className={`text-[12px] font-medium transition-colors truncate max-w-[200px] xs:max-w-[260px] sm:max-w-none ${hidden ? 'text-tv-muted' : 'text-tv-text'}`} title={indicator.name}>
+                            {indicator.name}
+                          </span>
+                          {!hidden && indicator.id.toLowerCase().includes('session') && (
+                            <div className="flex items-center gap-1.5 text-[10.5px] font-mono select-none">
+                              <span className="flex items-center gap-1 font-medium" style={{ color: indicator.params?.london_color || '#26a69a' }}>
+                                <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ backgroundColor: indicator.params?.london_color || '#26a69a' }} />
+                                {(indicator.params?.london_start || '03:00').replace(':', '')}-{(indicator.params?.london_end || '12:00').replace(':', '')}:1234567
+                              </span>
+                              <span className="flex items-center gap-1 font-medium" style={{ color: indicator.params?.ny_color || '#f59e0b' }}>
+                                <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ backgroundColor: indicator.params?.ny_color || '#f59e0b' }} />
+                                {(indicator.params?.ny_start || '08:00').replace(':', '')}-{(indicator.params?.ny_end || '17:00').replace(':', '')}:1234567
+                              </span>
+                              <span className="flex items-center gap-1 font-medium" style={{ color: indicator.params?.tokyo_color || '#00b4d8' }}>
+                                <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ backgroundColor: indicator.params?.tokyo_color || '#00b4d8' }} />
+                                {(indicator.params?.tokyo_start || '20:00').replace(':', '')}-{(indicator.params?.tokyo_end || '04:00').replace(':', '')}:1234567
+                              </span>
+                              <span className="flex items-center gap-1 font-medium" style={{ color: indicator.params?.sydney_color || '#ef5350' }}>
+                                <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ backgroundColor: indicator.params?.sydney_color || '#ef5350' }} />
+                                {(indicator.params?.sydney_start || '17:00').replace(':', '')}-{(indicator.params?.sydney_end || '02:00').replace(':', '')}:1234567
+                              </span>
+                            </div>
+                          )}
+                          {!hidden && data && !indicator.id.toLowerCase().includes('session') && (
+                            data.name.toLowerCase().includes('delta') && data.deltaData && data.deltaData.length > 0 ? (
+                              <span className="text-[11px] font-mono font-medium text-[#26a69a]">
+                                {data.deltaData[data.deltaData.length - 1].delta >= 0 ? '+' : ''}{data.deltaData[data.deltaData.length - 1].delta} (CVD: {data.deltaData[data.deltaData.length - 1].cvd})
+                              </span>
+                            ) : (
+                              data.plots.map((plot, pIdx) => {
+                                const lastPoint = plot[plot.length - 1];
+                                if (!lastPoint) return null;
+                                const isVol = data.name.toLowerCase() === 'volume';
+                                const formatVal = (v: number | null) => {
+                                  if (v === null || isNaN(v)) return '';
+                                  if (isVol) {
+                                    if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
+                                    if (v >= 1e3) return `${(v / 1e3).toFixed(2)}K`;
+                                    return `${Math.round(v)}`;
+                                  }
+                                  return data.overlay ? formatSymbolPrice(v, activeSymbol) : v.toFixed(2);
+                                };
+                                return (
+                                  <span key={pIdx} className="text-[11px] font-mono font-medium" style={{ color: lastPoint.color }}>
+                                    {formatVal(lastPoint.value)}
+                                  </span>
+                                );
+                              })
+                            )
+                          )}
+                        </div>
+                        
+                        {/* Indicator Controls: visible always on mobile (opacity-100), reveals on hover on desktop */}
+                        <div 
+                          id={`indicator-actions-${indicator.id}`}
+                          className="flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover/ind:opacity-100 transition-opacity shrink-0"
+                        >
+                          <button 
+                            id={`indicator-hide-btn-${indicator.id}`}
+                            onClick={(e) => { e.stopPropagation(); toggleIndicatorVisibility(indicator.id); }}
+                            className="p-1.5 sm:p-1 hover:bg-tv-hover active:bg-tv-hover rounded text-tv-muted hover:text-tv-text transition-colors cursor-pointer touch-manipulation"
+                            title={hidden ? "Show" : "Hide"}
+                            aria-label={hidden ? "Show indicator" : "Hide indicator"}
+                          >
+                            {hidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          </button>
+                          <button 
+                            id={`indicator-settings-btn-${indicator.id}`}
+                            onClick={(e) => { 
+                              e.stopPropagation(); 
+                              const ind = activeIndicators.find(i => i.id === indicator.id);
+                              if (ind) {
+                                const lenMatch = ind.code.match(/(?:len|length|hma_len|atr_len)\s*=\s*input\.(?:int|float)\(\s*(\d+)/i) || ind.code.match(/(?:sma|hma|rsi|atr)\s*\([^,]+,\s*(\d+)\)/i);
+                                setIndicatorParamLength(lenMatch ? parseInt(lenMatch[1], 10) : 20);
+                              }
+                              setSelectedIndicatorForSettings(indicator.id); 
+                            }}
+                            className="p-1.5 sm:p-1 hover:bg-tv-hover active:bg-tv-hover rounded text-tv-muted hover:text-tv-text transition-colors cursor-pointer touch-manipulation"
+                            title="Settings"
+                            aria-label="Indicator settings"
+                          >
+                            <Settings className="w-3.5 h-3.5" />
+                          </button>
+                          <button 
+                            id={`indicator-remove-btn-${indicator.id}`}
+                            onClick={(e) => { e.stopPropagation(); removeIndicator(indicator.id); }}
+                            className="p-1.5 sm:p-1 hover:bg-tv-hover active:bg-tv-hover rounded text-tv-muted hover:text-red-500 transition-colors cursor-pointer touch-manipulation"
+                            title="Remove"
+                            aria-label="Remove indicator"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
-          </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
       </div>

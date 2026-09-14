@@ -4,6 +4,8 @@ import { createPortal } from 'react-dom';
 import { derivClient, generateSeedCandles } from './lib/derivClient';
 import { 
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   LineChart,
   Bell,
   RotateCcw,
@@ -40,6 +42,7 @@ import {
   ZoomIn,
   Magnet,
   Lock,
+  Unlock,
   EyeOff,
   List,
   Square,
@@ -53,6 +56,7 @@ import {
   Sun,
   Moon,
   Bookmark,
+  Star,
   Code2,
   MoreHorizontal,
   Gauge,
@@ -60,7 +64,8 @@ import {
   Phone,
   LogOut,
   ShieldCheck,
-  User
+  User,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Editor from 'react-simple-code-editor';
@@ -93,6 +98,9 @@ import { SaveLayoutModal } from './components/Charting/SaveLayoutModal';
 import { QuickSearchModal } from './components/Charting/QuickSearchModal';
 import { ChartSettingsModal } from './components/Charting/ChartSettingsModal';
 import { ScreenshotModal } from './components/Charting/ScreenshotModal';
+import { CandleHistoryList } from './components/Charting/CandleHistoryList';
+import { PWAInstallButton } from './components/PWA/PWAInstallButton';
+import { OfflineIndicator } from './components/PWA/OfflineIndicator';
 import { formatSymbolPrice } from './lib/priceFormatter';
 import { useMarketStore, CURRENCY_PAIRS } from './store/useMarketStore';
 import { BUILTIN_INDICATORS } from './lib/indicatorsList';
@@ -124,6 +132,8 @@ const Header = () => {
     setQuickSearchOpen,
     setChartSettingsOpen,
     setScreenshotModalOpen,
+    activeTool, setActiveTool, clearDrawings,
+    watchlist, toggleWatchlist
   } = useMarketStore();
   const [isSymbolMenuOpen, setIsSymbolMenuOpen] = useState(false);
   const [isTimeframeMenuOpen, setIsTimeframeMenuOpen] = useState(false);
@@ -132,8 +142,34 @@ const Header = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [indicatorSearchQuery, setIndicatorSearchQuery] = useState('');
   const [indicatorTab, setIndicatorTab] = useState<'builtins' | 'scripts'>('builtins');
-  const [marketFilter, setMarketFilter] = useState<'all' | 'synthetic_index' | 'forex' | 'cryptocurrency' | 'commodities' | 'boom_crash'>('all');
+  const [marketFilter, setMarketFilter] = useState<'all' | 'watchlist' | 'synthetic_index' | 'forex' | 'cryptocurrency' | 'commodities' | 'boom_crash'>('all');
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const categoryScrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(true);
+
+  const checkCategoryScroll = useCallback(() => {
+    if (categoryScrollRef.current) {
+      const { scrollLeft, scrollWidth, clientWidth } = categoryScrollRef.current;
+      setCanScrollLeft(scrollLeft > 2);
+      setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 2);
+    }
+  }, []);
+
+  const scrollCategoryTabs = (dir: 'left' | 'right') => {
+    if (categoryScrollRef.current) {
+      const offset = dir === 'left' ? -140 : 140;
+      categoryScrollRef.current.scrollBy({ left: offset, behavior: 'smooth' });
+      setTimeout(checkCategoryScroll, 250);
+    }
+  };
+
+  useEffect(() => {
+    if (isSymbolMenuOpen) {
+      setTimeout(checkCategoryScroll, 60);
+    }
+  }, [isSymbolMenuOpen, checkCategoryScroll, marketFilter]);
 
   useEffect(() => {
     const handleFsChange = () => {
@@ -155,23 +191,26 @@ const Header = () => {
   const timeframeBtnRef = useRef<HTMLButtonElement>(null);
   const chartTypeBtnRef = useRef<HTMLButtonElement>(null);
   const indicatorsBtnRef = useRef<HTMLButtonElement>(null);
+  const drawBtnRef = useRef<HTMLButtonElement>(null);
   const profileBtnRef = useRef<HTMLButtonElement>(null);
 
   const [symbolMenuPos, setSymbolMenuPos] = useState({ left: 16, top: 42 });
   const [timeframeMenuPos, setTimeframeMenuPos] = useState({ left: 160, top: 42 });
   const [chartTypeMenuPos, setChartTypeMenuPos] = useState({ left: 220, top: 42 });
   const [indicatorsMenuPos, setIndicatorsMenuPos] = useState({ left: 280, top: 42 });
+  const [drawMenuPos, setDrawMenuPos] = useState({ left: 320, top: 42 });
   const [profileMenuPos, setProfileMenuPos] = useState({ right: 16, top: 46 });
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [isMobileDrawMenuOpen, setIsMobileDrawMenuOpen] = useState(false);
   
   const timeframes = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d', '1w'];
-  const quickTimeframes = ['1m', '5m', '15m', '1h', '4h', '1d'];
 
   const closeAllMenus = useCallback(() => {
     setIsSymbolMenuOpen(false);
     setIsTimeframeMenuOpen(false);
     setIsChartTypeMenuOpen(false);
     setIsIndicatorsMenuOpen(false);
+    setIsMobileDrawMenuOpen(false);
     setIsProfileMenuOpen(false);
   }, []);
 
@@ -185,6 +224,22 @@ const Header = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [closeAllMenus]);
+
+  const toggleMobileDrawMenu = () => {
+    if (!isMobileDrawMenuOpen && drawBtnRef.current) {
+      const rect = drawBtnRef.current.getBoundingClientRect();
+      setDrawMenuPos({
+        left: Math.max(8, Math.min(rect.left, window.innerWidth - 260)),
+        top: rect.bottom + 4,
+      });
+    }
+    setIsMobileDrawMenuOpen(!isMobileDrawMenuOpen);
+    setIsSymbolMenuOpen(false);
+    setIsTimeframeMenuOpen(false);
+    setIsChartTypeMenuOpen(false);
+    setIsIndicatorsMenuOpen(false);
+    setIsProfileMenuOpen(false);
+  };
 
   const toggleSymbolMenu = () => {
     if (!isSymbolMenuOpen && symbolBtnRef.current) {
@@ -267,6 +322,10 @@ const Header = () => {
                           (s.marketDisplay && s.marketDisplay.toLowerCase().includes(searchQuery.toLowerCase()));
     if (!matchesSearch) return false;
     if (marketFilter === 'all') return true;
+    if (marketFilter === 'watchlist') {
+      const wSet = new Set((watchlist || []).map(w => w.toLowerCase()));
+      return wSet.has(s.id.toLowerCase()) || wSet.has(s.symbol.toLowerCase());
+    }
     if (marketFilter === 'boom_crash') {
       return s.market === 'boom_crash' || 
              s.id.toLowerCase().includes('boom') || 
@@ -293,17 +352,23 @@ const Header = () => {
   return (
     <header className="h-10 tv-border-b flex items-center justify-between px-1.5 sm:px-2 text-tv-text bg-tv-bg z-30 select-none relative">
       <div className="flex items-center gap-1 sm:gap-1.5 h-full min-w-0 flex-1 overflow-x-auto no-scrollbar py-0.5">
-        {/* TradingView Brand Logo */}
+        {/* TradingView / Otivo Brand Logo */}
         <button 
           onClick={() => setActivePage('chart')}
-          className="flex items-center justify-center px-1.5 sm:px-2 h-8 rounded hover:bg-tv-hover transition-colors shrink-0 cursor-pointer"
-          title="TradingView - Return to Chart"
+          className="flex items-center gap-1.5 px-1.5 sm:px-2 h-8 rounded hover:bg-tv-hover transition-colors shrink-0 cursor-pointer"
+          title="OTIVO Chart View"
         >
           <img 
-            src={theme === 'dark' ? '/logo2.png' : '/logo.png'} 
-            alt="TradingView" 
-            className="h-4 sm:h-5 object-contain"
+            src="/app.png" 
+            alt="OTIVO" 
+            className="w-5 h-5 rounded-md object-contain shadow-xs shrink-0"
+            onError={(e) => {
+              const target = e.currentTarget;
+              target.onerror = null;
+              target.src = theme === 'dark' ? '/logo2.png' : '/logo.png';
+            }}
           />
+          <span className="font-bold text-xs tracking-wide text-tv-text hidden sm:inline-block">OTIVO</span>
         </button>
         <div className="w-px h-5 bg-tv-border mx-0.5 shrink-0" />
 
@@ -363,24 +428,12 @@ const Header = () => {
           <>
             <div className="w-px h-5 bg-tv-border mx-0.5 shrink-0" />
             
-            {/* Timeframe Selector with quick pills on medium+ screens */}
-            <div className="flex items-center gap-0.5 shrink-0">
-              <div className="hidden lg:flex items-center gap-0.5">
-                {quickTimeframes.map(tf => (
-                  <button
-                    key={tf}
-                    onClick={() => setTimeframe(tf as any)}
-                    className={`px-1.5 py-1 rounded text-xs transition-colors ${activeTimeframe === tf ? 'text-tv-accent font-bold bg-tv-accent/10' : 'text-tv-muted hover:text-tv-text hover:bg-tv-hover'}`}
-                  >
-                    {tf}
-                  </button>
-                ))}
-              </div>
-
+            {/* Timeframe Dropdown Selector */}
+            <div className="relative shrink-0">
               <button 
                 ref={timeframeBtnRef}
                 onClick={toggleTimeframeMenu}
-                className={`flex items-center gap-1 px-2 sm:px-2.5 h-8 rounded hover:bg-tv-hover transition-colors text-xs sm:text-[13px] font-semibold shrink-0 cursor-pointer ${isTimeframeMenuOpen ? 'bg-tv-hover text-tv-accent shadow-sm' : ''}`}
+                className={`flex items-center gap-1 px-2 sm:px-2.5 h-8 rounded hover:bg-tv-hover transition-colors text-xs sm:text-[13px] font-semibold shrink-0 cursor-pointer ${isTimeframeMenuOpen ? 'bg-tv-hover text-tv-accent shadow-sm' : 'text-tv-text'}`}
                 title="Select Interval"
               >
                 <span>{activeTimeframe}</span>
@@ -431,6 +484,22 @@ const Header = () => {
                   <span className="ml-0.5 px-1.5 py-0.2 text-[10px] bg-tv-accent text-white font-bold rounded-full">
                     {activeIndicators.length}
                   </span>
+                )}
+              </button>
+            </div>
+
+            {/* Mobile Drawing Tools Button (Direct 1-Tap Access on Mobile) */}
+            <div className="relative shrink-0 md:hidden">
+              <button 
+                ref={drawBtnRef}
+                onClick={toggleMobileDrawMenu}
+                className={`flex items-center gap-1 px-2 h-8 hover:bg-tv-hover rounded transition-colors text-xs font-medium shrink-0 cursor-pointer ${activeTool || isMobileDrawMenuOpen ? 'bg-tv-accent/15 text-tv-accent font-semibold border border-tv-accent/30' : ''}`}
+                title="Drawing Tools (Trend line, Fibonacci, etc.)"
+              >
+                <Pencil className="w-3.5 h-3.5 shrink-0 text-tv-accent" />
+                <span>Draw</span>
+                {activeTool && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-tv-accent animate-pulse" />
                 )}
               </button>
             </div>
@@ -536,12 +605,16 @@ const Header = () => {
               <Maximize2 className="w-4 h-4 text-tv-muted" />
             </button>
             <button 
+              id="top-bar-snapshot-camera-btn"
               onClick={() => setScreenshotModalOpen(true)}
-              className="hidden sm:flex p-1.5 hover:bg-tv-hover rounded transition-colors shrink-0 cursor-pointer" 
-              title="Take a Snapshot"
+              className="flex p-1.5 hover:bg-tv-hover rounded transition-colors shrink-0 cursor-pointer text-tv-muted hover:text-tv-text" 
+              title="Take a Snapshot (Chart & Tools)"
+              aria-label="Take a Snapshot"
             >
-              <Camera className="w-4 h-4 text-tv-muted" />
+              <Camera className="w-4 h-4 text-tv-muted hover:text-tv-text" />
             </button>
+            <PWAInstallButton className="hidden md:flex ml-0.5" />
+            <PWAInstallButton variant="icon" className="flex md:hidden" />
           </>
         )}
 
@@ -626,43 +699,95 @@ const Header = () => {
               </div>
             </div>
 
-            {/* Market Category Tabs */}
-            <div className="flex items-center px-3 py-1 gap-1 border-b border-tv-border/50 text-[11px] overflow-x-auto no-scrollbar">
-              <button 
-                onClick={() => setMarketFilter('all')}
-                className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'all' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
+            {/* Market Category Tabs with Navigation Arrows */}
+            <div className="relative flex items-center px-1.5 py-1 border-b border-tv-border/50 bg-tv-bg text-[11px] gap-1">
+              {/* Left Arrow Button */}
+              <button
+                type="button"
+                onClick={() => scrollCategoryTabs('left')}
+                disabled={!canScrollLeft}
+                className={`p-1 rounded transition-all shrink-0 cursor-pointer flex items-center justify-center ${
+                  canScrollLeft
+                    ? 'text-tv-text hover:bg-tv-hover hover:text-white bg-tv-card border border-tv-border shadow-xs opacity-100'
+                    : 'text-tv-muted/20 border border-transparent cursor-not-allowed opacity-20'
+                }`}
+                title="Previous categories"
+                aria-label="Previous categories"
               >
-                All ({availableSymbols.length})
+                <ChevronLeft className="w-3.5 h-3.5" />
               </button>
-              <button 
-                onClick={() => setMarketFilter('boom_crash')}
-                className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'boom_crash' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
+
+              {/* Tabs Horizontal Scroll Container */}
+              <div 
+                ref={categoryScrollRef}
+                onScroll={checkCategoryScroll}
+                onWheel={(e) => {
+                  if (categoryScrollRef.current) {
+                    categoryScrollRef.current.scrollLeft += e.deltaY;
+                    checkCategoryScroll();
+                  }
+                }}
+                className="flex items-center px-1 gap-1 overflow-x-auto no-scrollbar scroll-smooth flex-1"
               >
-                Boom & Crash
-              </button>
-              <button 
-                onClick={() => setMarketFilter('forex')}
-                className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'forex' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
+                <button 
+                  onClick={() => setMarketFilter('all')}
+                  className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'all' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
+                >
+                  All ({availableSymbols.length})
+                </button>
+                <button 
+                  onClick={() => setMarketFilter('watchlist')}
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'watchlist' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-tv-muted hover:text-tv-text'}`}
+                >
+                  <Star className={`w-3 h-3 ${marketFilter === 'watchlist' ? 'fill-slate-950' : 'text-amber-400'}`} />
+                  <span>Watchlist ({(watchlist || []).length})</span>
+                </button>
+                <button 
+                  onClick={() => setMarketFilter('boom_crash')}
+                  className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'boom_crash' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
+                >
+                  Boom & Crash
+                </button>
+                <button 
+                  onClick={() => setMarketFilter('forex')}
+                  className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'forex' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
+                >
+                  Forex
+                </button>
+                <button 
+                  onClick={() => setMarketFilter('synthetic_index')}
+                  className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'synthetic_index' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
+                >
+                  Derived
+                </button>
+                <button 
+                  onClick={() => setMarketFilter('cryptocurrency')}
+                  className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'cryptocurrency' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
+                >
+                  Crypto
+                </button>
+                <button 
+                  onClick={() => setMarketFilter('commodities')}
+                  className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'commodities' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
+                >
+                  Commodities
+                </button>
+              </div>
+
+              {/* Right Arrow Button */}
+              <button
+                type="button"
+                onClick={() => scrollCategoryTabs('right')}
+                disabled={!canScrollRight}
+                className={`p-1 rounded transition-all shrink-0 cursor-pointer flex items-center justify-center ${
+                  canScrollRight
+                    ? 'text-tv-text hover:bg-tv-hover hover:text-white bg-tv-card border border-tv-border shadow-xs opacity-100'
+                    : 'text-tv-muted/20 border border-transparent cursor-not-allowed opacity-20'
+                }`}
+                title="Next categories"
+                aria-label="Next categories"
               >
-                Forex
-              </button>
-              <button 
-                onClick={() => setMarketFilter('synthetic_index')}
-                className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'synthetic_index' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
-              >
-                Derived
-              </button>
-              <button 
-                onClick={() => setMarketFilter('cryptocurrency')}
-                className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'cryptocurrency' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
-              >
-                Crypto
-              </button>
-              <button 
-                onClick={() => setMarketFilter('commodities')}
-                className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'commodities' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
-              >
-                Commodities
+                <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </div>
 
@@ -670,14 +795,16 @@ const Header = () => {
             <div className="max-h-[55vh] sm:max-h-[340px] overflow-y-auto divide-y divide-tv-border/20">
               {filteredSymbols.length === 0 ? (
                 <div className="px-4 py-8 text-center text-xs text-tv-muted italic">
-                  No symbols found for "{searchQuery}"
+                  {marketFilter === 'watchlist' ? 'Your watchlist is empty. Star any symbol to save it.' : `No symbols found for "${searchQuery}"`}
                 </div>
               ) : (
                 filteredSymbols.map(pair => {
                   const symKey = pair.id || pair.symbol;
                   const isItemActive = activeSymbol.toLowerCase() === symKey.toLowerCase() || activeSymbol.toLowerCase() === pair.symbol.toLowerCase();
+                  const isWatchlisted = (watchlist || []).some(w => w.toLowerCase() === symKey.toLowerCase() || w.toLowerCase() === pair.symbol.toLowerCase());
+
                   return (
-                    <button 
+                    <div 
                       key={symKey}
                       onClick={() => {
                         setSymbol(symKey);
@@ -686,6 +813,17 @@ const Header = () => {
                       className={`w-full text-left px-3.5 py-2.5 hover:bg-tv-hover flex items-center justify-between group transition-colors cursor-pointer ${isItemActive ? 'bg-tv-accent/10 text-tv-accent' : ''}`}
                     >
                       <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleWatchlist(symKey);
+                          }}
+                          className="p-1 -ml-1 rounded hover:bg-tv-hover/80 text-tv-muted transition-colors cursor-pointer"
+                          title={isWatchlisted ? "Remove from Watchlist" : "Add to Watchlist"}
+                        >
+                          <Star className={`w-3.5 h-3.5 ${isWatchlisted ? 'fill-amber-400 text-amber-400' : 'text-tv-muted/40 hover:text-amber-400'}`} />
+                        </button>
                         <SymbolLogo symbol={symKey} size="sm" />
                         <div className="flex flex-col min-w-0">
                           <span className={`text-xs truncate ${isItemActive ? 'font-bold' : 'font-medium'}`}>{pair.display}</span>
@@ -698,7 +836,7 @@ const Header = () => {
                           <div className="w-1.5 h-1.5 rounded-full bg-tv-accent" />
                         )}
                       </div>
-                    </button>
+                    </div>
                   );
                 })
               )}
@@ -964,6 +1102,158 @@ const Header = () => {
         </>
       )}
 
+      {/* 4.5 Mobile Drawing Tools Dropdown Modal */}
+      {isMobileDrawMenuOpen && (
+        <>
+          <div 
+            className="fixed inset-0 z-[9990] bg-black/20" 
+            onClick={closeAllMenus} 
+          />
+          <div 
+            style={{
+              top: `${drawMenuPos.top}px`,
+              left: `${Math.max(8, Math.min(drawMenuPos.left, (typeof window !== 'undefined' ? window.innerWidth : 400) - 270))}px`
+            }}
+            className="fixed z-[9999] bg-tv-bg border border-tv-border shadow-2xl rounded-xl p-2 w-[260px] overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150 text-tv-text"
+          >
+            <div className="flex items-center justify-between px-1 pb-1.5 border-b border-tv-border/50">
+              <span className="text-[11px] font-bold text-tv-text uppercase tracking-wider flex items-center gap-1.5">
+                <Pencil className="w-3.5 h-3.5 text-tv-accent" />
+                Mobile Drawing Tools
+              </span>
+              <button 
+                onClick={closeAllMenus}
+                className="p-1 rounded text-tv-muted hover:text-tv-text"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div className="py-1 text-[10px] font-bold text-tv-muted uppercase px-1">
+              Popular Tools
+            </div>
+
+            <div className="grid grid-cols-2 gap-1 pb-2 border-b border-tv-border/50">
+              {/* Trendline */}
+              <button
+                onClick={() => {
+                  setActiveTool('Trendline');
+                  closeAllMenus();
+                }}
+                className={`flex items-center gap-2 p-2 rounded-lg border text-left transition-colors cursor-pointer ${activeTool === 'Trendline' ? 'bg-tv-accent/15 border-tv-accent/50 text-tv-accent font-bold' : 'border-tv-border/40 hover:bg-tv-hover text-tv-text'}`}
+              >
+                <Slash className="w-4 h-4 text-[#2962ff] shrink-0" />
+                <div className="flex flex-col min-w-0">
+                  <span className="text-xs font-semibold leading-tight">Trend Line</span>
+                  <span className="text-[9px] text-tv-muted">2-point drag</span>
+                </div>
+              </button>
+
+              {/* Fib Retracement */}
+              <button
+                onClick={() => {
+                  setActiveTool('Fib retracement');
+                  closeAllMenus();
+                }}
+                className={`flex items-center gap-2 p-2 rounded-lg border text-left transition-colors cursor-pointer ${activeTool === 'Fib retracement' ? 'bg-tv-accent/15 border-tv-accent/50 text-tv-accent font-bold' : 'border-tv-border/40 hover:bg-tv-hover text-tv-text'}`}
+              >
+                <AlignJustify className="w-4 h-4 text-[#f59e0b] shrink-0 rotate-90" />
+                <div className="flex flex-col min-w-0">
+                  <span className="text-xs font-semibold leading-tight">Fibonacci</span>
+                  <span className="text-[9px] text-tv-muted">Retracement</span>
+                </div>
+              </button>
+
+              {/* Horizontal Line */}
+              <button
+                onClick={() => {
+                  setActiveTool('Horizontal line');
+                  closeAllMenus();
+                }}
+                className={`flex items-center gap-2 p-2 rounded-lg border text-left transition-colors cursor-pointer ${activeTool === 'Horizontal line' ? 'bg-tv-accent/15 border-tv-accent/50 text-tv-accent font-bold' : 'border-tv-border/40 hover:bg-tv-hover text-tv-text'}`}
+              >
+                <div className="w-4 h-[2px] bg-[#089981] shrink-0" />
+                <div className="flex flex-col min-w-0">
+                  <span className="text-xs font-semibold leading-tight">Horizontal</span>
+                  <span className="text-[9px] text-tv-muted">Support/Res</span>
+                </div>
+              </button>
+
+              {/* Parallel Channel */}
+              <button
+                onClick={() => {
+                  setActiveTool('Parallel channel');
+                  closeAllMenus();
+                }}
+                className={`flex items-center gap-2 p-2 rounded-lg border text-left transition-colors cursor-pointer ${activeTool === 'Parallel channel' ? 'bg-tv-accent/15 border-tv-accent/50 text-tv-accent font-bold' : 'border-tv-border/40 hover:bg-tv-hover text-tv-text'}`}
+              >
+                <Layers className="w-4 h-4 text-[#8b5cf6] shrink-0" />
+                <div className="flex flex-col min-w-0">
+                  <span className="text-xs font-semibold leading-tight">Channel</span>
+                  <span className="text-[9px] text-tv-muted">3-point range</span>
+                </div>
+              </button>
+
+              {/* Rectangle */}
+              <button
+                onClick={() => {
+                  setActiveTool('Rectangle');
+                  closeAllMenus();
+                }}
+                className={`flex items-center gap-2 p-2 rounded-lg border text-left transition-colors cursor-pointer ${activeTool === 'Rectangle' ? 'bg-tv-accent/15 border-tv-accent/50 text-tv-accent font-bold' : 'border-tv-border/40 hover:bg-tv-hover text-tv-text'}`}
+              >
+                <Square className="w-4 h-4 text-[#ec4899] shrink-0" />
+                <div className="flex flex-col min-w-0">
+                  <span className="text-xs font-semibold leading-tight">Rectangle</span>
+                  <span className="text-[9px] text-tv-muted">Supply/Demand</span>
+                </div>
+              </button>
+
+              {/* Long Position */}
+              <button
+                onClick={() => {
+                  setActiveTool('Long position');
+                  closeAllMenus();
+                }}
+                className={`flex items-center gap-2 p-2 rounded-lg border text-left transition-colors cursor-pointer ${activeTool === 'Long position' ? 'bg-tv-accent/15 border-tv-accent/50 text-tv-accent font-bold' : 'border-tv-border/40 hover:bg-tv-hover text-tv-text'}`}
+              >
+                <TrendingUp className="w-4 h-4 text-[#10b981] shrink-0" />
+                <div className="flex flex-col min-w-0">
+                  <span className="text-xs font-semibold leading-tight">Long Pos</span>
+                  <span className="text-[9px] text-tv-muted">Risk/Reward</span>
+                </div>
+              </button>
+            </div>
+
+            {/* Quick Actions Footer */}
+            <div className="pt-2 flex items-center justify-between gap-1">
+              <button
+                onClick={() => {
+                  setActiveTool(null);
+                  closeAllMenus();
+                }}
+                className="flex-1 py-1.5 px-2 bg-tv-hover hover:bg-tv-hover/80 text-xs font-medium rounded-lg text-tv-text transition-colors flex items-center justify-center gap-1 cursor-pointer"
+              >
+                <Crosshair className="w-3.5 h-3.5 text-tv-muted" />
+                <span>Cursor</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  clearDrawings(activeSymbol);
+                  closeAllMenus();
+                }}
+                className="py-1.5 px-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                title="Clear all drawings on current chart"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Clear</span>
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
       {/* 5. User Profile Dropdown Modal (Portaled to document.body to prevent sidebar overlap & clipping) */}
       {isProfileMenuOpen && user && typeof document !== 'undefined' && createPortal(
         <>
@@ -1088,7 +1378,15 @@ const Header = () => {
 
 // Drawing Toolbar Component
 const DrawingToolbar = () => {
-  const { theme, setActiveTool, activeTool, clearDrawings, activeSymbol } = useMarketStore();
+  const { 
+    theme, setActiveTool, activeTool, clearDrawings, activeSymbol,
+    isMagnetMode, toggleMagnetMode, magnetModeType, setMagnetModeType,
+    isStayInDrawingMode, toggleStayInDrawingMode,
+    isLockAllDrawings, toggleLockAllDrawings,
+    isHideAllDrawings, toggleHideAllDrawings,
+    isHideAllIndicators, toggleHideAllIndicators,
+    removeAllDrawings, removeAllIndicators, removeAllObjects
+  } = useMarketStore();
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [selectedTools, setSelectedTools] = useState<Record<string, string>>({
     lines: 'Trendline',
@@ -1308,35 +1606,160 @@ const DrawingToolbar = () => {
       
       <div className="w-8 h-px bg-tv-border my-1.5" />
       
-      {/* Utility Tools Group */}
-      <button className="p-2.5 hover:bg-tv-hover rounded transition-colors group relative" title="Measure">
-        <Ruler className="w-5 h-5 text-tv-muted group-hover:text-tv-text" />
+      {/* 1. Measure Tool */}
+      <button 
+        onClick={() => {
+          setActiveTool(activeTool === 'Price range' ? null : 'Price range');
+          setActiveMenu(null);
+        }}
+        className={`p-2.5 rounded transition-colors group relative cursor-pointer ${
+          activeTool === 'Price range' 
+            ? 'bg-[#2962ff] text-white shadow-xs' 
+            : 'hover:bg-tv-hover text-tv-muted hover:text-tv-text'
+        }`} 
+        title="Measure (Shift + Click on chart)"
+      >
+        <Ruler className="w-5 h-5" />
       </button>
-      <button className="p-2.5 hover:bg-tv-hover rounded transition-colors group relative" title="Zoom In">
-        <Search className="w-5 h-5 text-tv-muted group-hover:text-tv-text" />
+
+      {/* 2. Zoom In Tool */}
+      <button 
+        onClick={() => {
+          setActiveTool(activeTool === 'Zoom' ? null : 'Zoom');
+          setActiveMenu(null);
+        }}
+        className={`p-2.5 rounded transition-colors group relative cursor-pointer ${
+          activeTool === 'Zoom' 
+            ? 'bg-[#2962ff] text-white shadow-xs' 
+            : 'hover:bg-tv-hover text-tv-muted hover:text-tv-text'
+        }`} 
+        title="Zoom In (Click & drag box on chart)"
+      >
+        <ZoomIn className="w-5 h-5" />
       </button>
       
       <div className="w-8 h-px bg-tv-border my-1.5" />
       
-      {/* Mode Tools Group */}
-      <button className="p-2.5 hover:bg-tv-hover rounded transition-colors group relative" title="Magnet Mode">
-        <Magnet className="w-5 h-5 text-tv-muted group-hover:text-tv-text" />
-      </button>
-      <button className="p-2.5 hover:bg-tv-hover rounded transition-colors group relative">
+      {/* 3. Magnet Mode Tool */}
+      <div className="relative group">
+        <button 
+          onClick={toggleMagnetMode}
+          className={`p-2.5 rounded transition-colors relative cursor-pointer ${
+            isMagnetMode 
+              ? 'bg-[#2962ff] text-white shadow-xs' 
+              : 'hover:bg-tv-hover text-tv-muted hover:text-tv-text'
+          }`} 
+          title={`Magnet Mode: ${isMagnetMode ? 'On (Snaps drawing points to OHLC)' : 'Off'}`}
+        >
+          <Magnet className="w-5 h-5" />
+          {isMagnetMode && (
+            <span className="absolute bottom-1 right-1 w-1.5 h-1.5 bg-white rounded-full ring-1 ring-[#2962ff]" />
+          )}
+        </button>
+      </div>
+
+      {/* 4. Stay in Drawing Mode Tool */}
+      <button 
+        onClick={toggleStayInDrawingMode}
+        className={`p-2.5 rounded transition-colors group relative cursor-pointer ${
+          isStayInDrawingMode 
+            ? 'bg-[#2962ff] text-white shadow-xs' 
+            : 'hover:bg-tv-hover text-tv-muted hover:text-tv-text'
+        }`} 
+        title={`Stay in Drawing Mode: ${isStayInDrawingMode ? 'On (Keeps active tool after placement)' : 'Off'}`}
+      >
         <div className="relative">
-          <Pencil className="w-5 h-5 text-tv-muted group-hover:text-tv-text" />
-          <Lock className="w-[10px] h-[10px] absolute -bottom-1 -right-1 text-tv-muted group-hover:text-tv-text bg-tv-bg rounded-full p-[1px]" />
+          <Pencil className="w-5 h-5" />
+          <Lock className={`w-[10px] h-[10px] absolute -bottom-1 -right-1 rounded-full p-[1px] ${
+            isStayInDrawingMode ? 'bg-[#2962ff] text-white' : 'text-tv-muted group-hover:text-tv-text bg-tv-bg'
+          }`} />
         </div>
       </button>
-      <button className="p-2.5 hover:bg-tv-hover rounded transition-colors group relative" title="Lock All Drawing Tools">
-        <Lock className="w-5 h-5 text-tv-muted group-hover:text-tv-text" />
+
+      {/* 5. Lock All Drawing Tools */}
+      <button 
+        onClick={toggleLockAllDrawings}
+        className={`p-2.5 rounded transition-colors group relative cursor-pointer ${
+          isLockAllDrawings 
+            ? 'bg-[#2962ff] text-white shadow-xs' 
+            : 'hover:bg-tv-hover text-tv-muted hover:text-tv-text'
+        }`} 
+        title={`Lock All Drawing Tools: ${isLockAllDrawings ? 'Locked (Drawings cannot be edited or moved)' : 'Unlocked'}`}
+      >
+        {isLockAllDrawings ? <Lock className="w-5 h-5" /> : <Unlock className="w-5 h-5" />}
       </button>
-      <button className="p-2.5 hover:bg-tv-hover rounded transition-colors group relative">
-        <div className="relative">
-          <Eye className="w-5 h-5 text-tv-muted group-hover:text-tv-text" />
-          <Paintbrush className="w-[10px] h-[10px] absolute -bottom-1 -right-1 text-tv-muted group-hover:text-tv-text bg-tv-bg rounded-full p-[1px]" />
-        </div>
-      </button>
+
+      {/* 6. Hide All Drawings / Hide Objects */}
+      <div className="relative">
+        <button 
+          onClick={toggleHideAllDrawings}
+          className={`p-2.5 rounded transition-colors group relative cursor-pointer ${
+            isHideAllDrawings 
+              ? 'bg-[#2962ff] text-white shadow-xs' 
+              : 'hover:bg-tv-hover text-tv-muted hover:text-tv-text'
+          }`} 
+          title={`Hide All Drawings: ${isHideAllDrawings ? 'Hidden (Click to show)' : 'Visible (Click to hide)'}`}
+        >
+          <div className="relative">
+            {isHideAllDrawings ? (
+              <EyeOff className="w-5 h-5" />
+            ) : (
+              <Eye className="w-5 h-5" />
+            )}
+            <Paintbrush className={`w-[10px] h-[10px] absolute -bottom-1 -right-1 rounded-full p-[1px] ${
+              isHideAllDrawings ? 'bg-[#2962ff] text-white' : 'text-tv-muted group-hover:text-tv-text bg-tv-bg'
+            }`} />
+          </div>
+        </button>
+      </div>
+
+      {/* 7. Remove Objects (Trash) */}
+      <div className="relative">
+        <button 
+          onClick={() => setActiveMenu(activeMenu === 'trash' ? null : 'trash')}
+          className={`p-2.5 rounded transition-colors group relative cursor-pointer ${
+            activeMenu === 'trash' ? 'bg-tv-hover text-tv-text' : 'hover:bg-tv-hover text-tv-muted hover:text-red-500'
+          }`} 
+          title="Remove Objects"
+        >
+          <Trash2 className="w-5 h-5" />
+        </button>
+
+        {activeMenu === 'trash' && (
+          <div className="absolute left-full bottom-0 ml-2 bg-tv-card border border-tv-border rounded-lg shadow-xl py-1 w-52 z-[100] text-tv-text text-xs">
+            <button 
+              onClick={() => {
+                removeAllDrawings(activeSymbol);
+                setActiveMenu(null);
+              }}
+              className="w-full px-3 py-2 text-left hover:bg-tv-hover flex items-center gap-2 cursor-pointer"
+            >
+              <Trash2 className="w-4 h-4 text-tv-muted" />
+              <span>Remove Drawings</span>
+            </button>
+            <button 
+              onClick={() => {
+                removeAllIndicators();
+                setActiveMenu(null);
+              }}
+              className="w-full px-3 py-2 text-left hover:bg-tv-hover flex items-center gap-2 cursor-pointer"
+            >
+              <Trash2 className="w-4 h-4 text-tv-muted" />
+              <span>Remove Indicators</span>
+            </button>
+            <button 
+              onClick={() => {
+                removeAllObjects(activeSymbol);
+                setActiveMenu(null);
+              }}
+              className="w-full px-3 py-2 text-left hover:bg-tv-hover text-red-500 flex items-center gap-2 border-t border-tv-border/50 cursor-pointer font-medium"
+            >
+              <Trash2 className="w-4 h-4 text-red-500" />
+              <span>Remove Drawings & Indicators</span>
+            </button>
+          </div>
+        )}
+      </div>
       
       <div className="flex-1" />
 
@@ -1353,6 +1776,30 @@ const WatchlistPanel = ({ theme, onClose }: { theme: 'light' | 'dark', onClose: 
   const { availableSymbols, activeSymbol, setSymbol, lastTick } = useMarketStore();
   const [activeTab, setActiveTab] = useState<string>('ALL');
   const [quotes, setQuotes] = useState<Record<string, { price: number; change: number; pct: number }>>({});
+
+  const watchlistScrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(true);
+
+  const checkWatchlistScroll = useCallback(() => {
+    if (watchlistScrollRef.current) {
+      const { scrollLeft, scrollWidth, clientWidth } = watchlistScrollRef.current;
+      setCanScrollLeft(scrollLeft > 2);
+      setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 2);
+    }
+  }, []);
+
+  const scrollWatchlistTabs = (dir: 'left' | 'right') => {
+    if (watchlistScrollRef.current) {
+      const offset = dir === 'left' ? -100 : 100;
+      watchlistScrollRef.current.scrollBy({ left: offset, behavior: 'smooth' });
+      setTimeout(checkWatchlistScroll, 250);
+    }
+  };
+
+  useEffect(() => {
+    checkWatchlistScroll();
+  }, [checkWatchlistScroll, activeTab]);
 
   // Keep track of quotes
   useEffect(() => {
@@ -1402,17 +1849,59 @@ const WatchlistPanel = ({ theme, onClose }: { theme: 'light' | 'dark', onClose: 
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex items-center px-2 py-1 gap-1 border-b border-tv-border/40 overflow-x-auto text-[11px]">
-        {categories.map(c => (
-          <button
-            key={c.key}
-            onClick={() => setActiveTab(c.key)}
-            className={`px-2 py-1 rounded transition-colors whitespace-nowrap ${activeTab === c.key ? 'bg-tv-hover text-tv-accent font-bold' : 'text-tv-muted hover:text-tv-text'}`}
-          >
-            {c.label}
-          </button>
-        ))}
+      {/* Tabs with Navigation Arrows */}
+      <div className="relative flex items-center px-1.5 py-1 gap-1 border-b border-tv-border/40 text-[11px] bg-tv-bg">
+        <button
+          type="button"
+          onClick={() => scrollWatchlistTabs('left')}
+          disabled={!canScrollLeft}
+          className={`p-1 rounded transition-all shrink-0 cursor-pointer flex items-center justify-center ${
+            canScrollLeft
+              ? 'text-tv-text hover:bg-tv-hover hover:text-white bg-tv-card border border-tv-border shadow-xs opacity-100'
+              : 'text-tv-muted/20 border border-transparent cursor-not-allowed opacity-20'
+          }`}
+          title="Previous categories"
+          aria-label="Previous categories"
+        >
+          <ChevronLeft className="w-3.5 h-3.5" />
+        </button>
+
+        <div 
+          ref={watchlistScrollRef}
+          onScroll={checkWatchlistScroll}
+          onWheel={(e) => {
+            if (watchlistScrollRef.current) {
+              watchlistScrollRef.current.scrollLeft += e.deltaY;
+              checkWatchlistScroll();
+            }
+          }}
+          className="flex items-center px-1 gap-1 overflow-x-auto no-scrollbar scroll-smooth flex-1"
+        >
+          {categories.map(c => (
+            <button
+              key={c.key}
+              onClick={() => setActiveTab(c.key)}
+              className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${activeTab === c.key ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => scrollWatchlistTabs('right')}
+          disabled={!canScrollRight}
+          className={`p-1 rounded transition-all shrink-0 cursor-pointer flex items-center justify-center ${
+            canScrollRight
+              ? 'text-tv-text hover:bg-tv-hover hover:text-white bg-tv-card border border-tv-border shadow-xs opacity-100'
+              : 'text-tv-muted/20 border border-transparent cursor-not-allowed opacity-20'
+          }`}
+          title="Next categories"
+          aria-label="Next categories"
+        >
+          <ChevronRight className="w-3.5 h-3.5" />
+        </button>
       </div>
 
       <div className="flex items-center px-3 py-1.5 text-[10px] font-bold text-tv-muted/70 uppercase">
@@ -1683,6 +2172,7 @@ const UtilitySidebar = ({ activePanel, onToggle }: { activePanel: string | null,
 const BottomBar = () => {
   const ranges = ['1D', '5D', '1M', '3M', '6M', 'YTD', '1Y', '5Y', 'All'];
   const [activeRange, setActiveRange] = useState('1Y');
+  const setCandleHistoryModalOpen = useMarketStore(s => s.setCandleHistoryModalOpen);
 
   return (
     <footer className="h-8 sm:h-9 tv-border-t bg-tv-bg flex items-center justify-between px-2 sm:px-3 text-[10px] sm:text-[11px] font-medium text-tv-muted z-30 overflow-hidden">
@@ -1699,6 +2189,16 @@ const BottomBar = () => {
         <div className="w-px h-4 bg-tv-border mx-0.5 sm:mx-1 shrink-0" />
         <button className="p-1 sm:p-1.5 hover:bg-tv-hover rounded transition-colors shrink-0">
           <Calendar className="w-3.5 h-3.5" />
+        </button>
+        <div className="w-px h-4 bg-tv-border mx-0.5 sm:mx-1 shrink-0" />
+        <button 
+          id="open-candle-history-btn"
+          onClick={() => setCandleHistoryModalOpen(true)}
+          className="flex items-center gap-1 px-2 h-6 sm:h-7 rounded hover:bg-tv-hover transition-colors text-slate-300 font-medium shrink-0"
+          title="Open Virtualized Candle History Data Window (react-window)"
+        >
+          <Database className="w-3.5 h-3.5 text-blue-400" />
+          <span className="hidden sm:inline">Data Window</span>
         </button>
       </div>
       
@@ -1718,8 +2218,9 @@ const BottomBar = () => {
 export default function App() {
   const { user, loading: authLoading } = useAuth();
   const { 
-    activeSymbol, activeTimeframe, addTick, setCandles, updateCandle, 
-    theme, setAvailableSymbols, activePage, activePanel, setActivePanel 
+    activeSymbol, activeTimeframe, addTick, setCandles, updateCandle, candles,
+    theme, setAvailableSymbols, activePage, activePanel, setActivePanel,
+    isCandleHistoryModalOpen, setCandleHistoryModalOpen
   } = useMarketStore();
   const socketRef = useRef<any>(null);
 
@@ -1835,6 +2336,16 @@ export default function App() {
       <QuickSearchModal />
       <ChartSettingsModal />
       <ScreenshotModal />
+      <OfflineIndicator />
+      {isCandleHistoryModalOpen && (
+        <CandleHistoryList
+          candles={candles || []}
+          symbol={activeSymbol}
+          timeframe={activeTimeframe}
+          theme={theme}
+          onClose={() => setCandleHistoryModalOpen(false)}
+        />
+      )}
 
       {activePage === 'technical-analysis' ? (
         <TechnicalAnalysisPage />

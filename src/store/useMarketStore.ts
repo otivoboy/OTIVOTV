@@ -63,6 +63,15 @@ interface MarketState {
   pivotMode: 'classic' | 'fibonacci' | 'camarilla';
   activePanel: string | null;
   chartType: ChartType;
+  watchlist: string[];
+  
+  // Drawing Modes & Utility Tools
+  isMagnetMode: boolean;
+  magnetModeType: 'weak' | 'strong';
+  isStayInDrawingMode: boolean;
+  isLockAllDrawings: boolean;
+  isHideAllDrawings: boolean;
+  isHideAllIndicators: boolean;
   
   // Alerts
   alerts: PriceAlert[];
@@ -85,6 +94,7 @@ interface MarketState {
   isScreenshotModalOpen: boolean;
   isSaveLayoutModalOpen: boolean;
   isLayoutSelectorOpen: boolean;
+  isCandleHistoryModalOpen: boolean;
   
   // Cloud Sync Status
   isSyncingCloud: boolean;
@@ -110,6 +120,15 @@ interface MarketState {
   clearDrawings: (symbol: string) => void;
   undoDrawing: () => void;
   redoDrawing: () => void;
+  toggleMagnetMode: () => void;
+  setMagnetModeType: (type: 'weak' | 'strong') => void;
+  toggleStayInDrawingMode: () => void;
+  toggleLockAllDrawings: () => void;
+  toggleHideAllDrawings: () => void;
+  toggleHideAllIndicators: () => void;
+  removeAllDrawings: (symbol?: string) => void;
+  removeAllIndicators: () => void;
+  removeAllObjects: (symbol?: string) => void;
   addScript: (script: IndicatorItem) => void;
   applyScript: (script: IndicatorItem) => void;
   addIndicator: (indicator: { id?: string; name: string; code: string; enabled?: boolean; params?: Record<string, any> }) => void;
@@ -120,6 +139,10 @@ interface MarketState {
   setPivotMode: (mode: 'classic' | 'fibonacci' | 'camarilla') => void;
   setActivePanel: (panel: string | null) => void;
   setChartType: (chartType: ChartType) => void;
+  setWatchlist: (symbols: string[]) => void;
+  addToWatchlist: (symbol: string) => void;
+  removeFromWatchlist: (symbol: string) => void;
+  toggleWatchlist: (symbol: string) => void;
 
   // Alerts Actions
   addAlert: (alert: Omit<PriceAlert, 'id' | 'createdAt' | 'triggered'>) => void;
@@ -153,6 +176,7 @@ interface MarketState {
   setScreenshotModalOpen: (open: boolean) => void;
   setSaveLayoutModalOpen: (open: boolean) => void;
   setLayoutSelectorOpen: (open: boolean) => void;
+  setCandleHistoryModalOpen: (open: boolean) => void;
 
   // Cloud Actions
   syncToCloud: (accessToken: string) => Promise<void>;
@@ -266,6 +290,15 @@ export const useMarketStore = create<MarketState>()(
       pivotMode: 'classic',
       activePanel: null,
       chartType: 'candlestick',
+      watchlist: ['1HZ100V', 'R_100', 'frxEURUSD', 'cryBTCUSD', 'AAPL', 'TSLA'],
+
+      // Drawing Modes & Utility Tools
+      isMagnetMode: false,
+      magnetModeType: 'weak',
+      isStayInDrawingMode: false,
+      isLockAllDrawings: false,
+      isHideAllDrawings: false,
+      isHideAllIndicators: false,
 
       // Alerts
       alerts: [],
@@ -313,6 +346,7 @@ export const useMarketStore = create<MarketState>()(
       isScreenshotModalOpen: false,
       isSaveLayoutModalOpen: false,
       isLayoutSelectorOpen: false,
+      isCandleHistoryModalOpen: false,
       isSyncingCloud: false,
 
       setActivePage: (page) => set({ activePage: page }),
@@ -416,6 +450,27 @@ export const useMarketStore = create<MarketState>()(
           selectedDrawingId: null
         };
       }),
+      toggleMagnetMode: () => set((state) => ({ isMagnetMode: !state.isMagnetMode })),
+      setMagnetModeType: (type) => set({ magnetModeType: type }),
+      toggleStayInDrawingMode: () => set((state) => ({ isStayInDrawingMode: !state.isStayInDrawingMode })),
+      toggleLockAllDrawings: () => set((state) => ({ isLockAllDrawings: !state.isLockAllDrawings })),
+      toggleHideAllDrawings: () => set((state) => ({ isHideAllDrawings: !state.isHideAllDrawings })),
+      toggleHideAllIndicators: () => set((state) => ({ isHideAllIndicators: !state.isHideAllIndicators })),
+      removeAllDrawings: (symbol) => set((state) => ({
+        undoStack: [...state.undoStack, state.drawings],
+        redoStack: [],
+        drawings: symbol ? state.drawings.filter(d => d.symbol !== symbol) : [],
+        selectedDrawingId: null
+      })),
+      removeAllIndicators: () => set({ activeIndicators: [], hiddenIndicators: [] }),
+      removeAllObjects: (symbol) => set((state) => ({
+        undoStack: [...state.undoStack, state.drawings],
+        redoStack: [],
+        drawings: symbol ? state.drawings.filter(d => d.symbol !== symbol) : [],
+        selectedDrawingId: null,
+        activeIndicators: [],
+        hiddenIndicators: []
+      })),
       addTick: (tick) => set((state) => {
         const isCurrent = tick.symbol.toLowerCase() === state.activeSymbol.toLowerCase();
         const tickTimeSec = tick.time > 1e11 ? Math.floor(tick.time / 1000) : tick.time;
@@ -647,6 +702,19 @@ export const useMarketStore = create<MarketState>()(
       setPivotMode: (mode) => set({ pivotMode: mode }),
       setActivePanel: (panel) => set({ activePanel: panel }),
       setChartType: (type) => set({ chartType: type }),
+      setWatchlist: (symbols) => set({ watchlist: symbols }),
+      addToWatchlist: (symbol) => set((state) => {
+        if (state.watchlist.includes(symbol)) return {};
+        return { watchlist: [...state.watchlist, symbol] };
+      }),
+      removeFromWatchlist: (symbol) => set((state) => ({
+        watchlist: state.watchlist.filter(s => s !== symbol)
+      })),
+      toggleWatchlist: (symbol) => set((state) => ({
+        watchlist: state.watchlist.includes(symbol)
+          ? state.watchlist.filter(s => s !== symbol)
+          : [...state.watchlist, symbol]
+      })),
 
       // Alerts Actions
       addAlert: (alert) => set((state) => {
@@ -855,6 +923,7 @@ export const useMarketStore = create<MarketState>()(
       setScreenshotModalOpen: (open) => set({ isScreenshotModalOpen: open }),
       setSaveLayoutModalOpen: (open) => set({ isSaveLayoutModalOpen: open }),
       setLayoutSelectorOpen: (open) => set({ isLayoutSelectorOpen: open }),
+      setCandleHistoryModalOpen: (open) => set({ isCandleHistoryModalOpen: open }),
 
       // Google Drive Actions
       syncToCloud: async (accessToken: string) => {
@@ -923,7 +992,8 @@ export const useMarketStore = create<MarketState>()(
         savedLayouts: state.savedLayouts,
         currentLayoutName: state.currentLayoutName,
         chartSettings: state.chartSettings,
-        drawings: state.drawings
+        drawings: state.drawings,
+        watchlist: state.watchlist
       })
     }
   )

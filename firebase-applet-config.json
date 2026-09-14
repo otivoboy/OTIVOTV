@@ -4,6 +4,7 @@
   "apiKey": "AIzaSyCy6UgqmBLsxrfs_VZqIV9g-wHCD8Z61q8",
   "authDomain": "studio-1256110026-44ab5.firebaseapp.com",
   "firestoreDatabaseId": "(default)",
+  "databaseURL": "https://studio-1256110026-44ab5-default-rtdb.firebaseio.com",
   "storageBucket": "studio-1256110026-44ab5.firebasestorage.app",
   "messagingSenderId": "681244185893",
   "measurementId": "",

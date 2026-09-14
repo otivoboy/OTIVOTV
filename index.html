@@ -2,12 +2,48 @@
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>OTIVO Chart View</title>
-    <link rel="icon" type="image/png" href="/logo.png">
-    <link rel="shortcut icon" type="image/png" href="/logo.png">
-    <link rel="apple-touch-icon" href="/logo.png">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/pwa-192x192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="/app.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="shortcut icon" href="/favicon.ico">
+    <link rel="manifest" href="/manifest.webmanifest">
     <meta name="description" content="High-performance real-time trading platform with AI-driven analytics, live tick data streaming, and advanced charting.">
+    <meta name="theme-color" content="#131722">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Otivo">
+    <meta name="application-name" content="OTIVO Chart View">
+    <meta property="og:title" content="OTIVO Chart View">
+    <meta property="og:description" content="High-performance real-time trading platform with AI-driven analytics, live tick data streaming, and advanced charting.">
+    <meta property="og:image" content="/app.png">
+    
+    <!-- PWA Service Worker & Install Prompt Capture -->
+    <script>
+      window.deferredPWAInstallPrompt = null;
+      window.addEventListener('beforeinstallprompt', function(e) {
+        e.preventDefault();
+        window.deferredPWAInstallPrompt = e;
+        window.dispatchEvent(new CustomEvent('pwa-prompt-ready'));
+      });
+
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('/sw.js', { scope: '/' })
+            .then(function(reg) {
+              console.log('OTIVO PWA Service Worker registered:', reg.scope);
+            })
+            .catch(function(err) {
+              console.warn('OTIVO PWA Service Worker registration warning:', err);
+            });
+        });
+      }
+    </script>
     
     <!-- Apply theme before render to prevent flash -->
     <script>
