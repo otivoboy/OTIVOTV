@@ -1228,6 +1228,212 @@ plot(r_tl, 'RSI TrendLine', color=#FF0000, linewidth=2)
 plot(r_gbl, 'Market Baseline', color=color.orange, linewidth=2)
 plot(VB_UP, 'Volatility Upper', color=#b2ebf2, linewidth=1)
 plot(VB_DOWN, 'Volatility Lower', color=#b2ebf2, linewidth=1)`
+  },
+  {
+    id: 'top_down_demand_confirmation',
+    name: 'Top-Down MTF Demand + Structure Confirmation',
+    category: 'Smart Money',
+    description: 'Top-down multi-timeframe Demand + Market Structure confirmation indicator. Analyzes Daily trend bias (HH/HL), marks 4H major demand/supply displacement zones, refines inside 1H and 30M, waits for price return, validates 15M CHoCH and 5M liquidity sweep + BOS, and triggers refined 5M demand entries with candle SL and trend-high TP.',
+    overlay: true,
+    defaultParams: {
+      daily_mode: 'hh_hl',
+      daily_lookback: 5,
+      daily_ema_filter: true,
+      only_trend_entries: true,
+      allow_bullish: true,
+      allow_bearish: true,
+      show_4h_zones: true,
+      impulse_mult_4h: 1.25,
+      check_unmitigated: true,
+      refine_1h: true,
+      refine_30m: true,
+      require_15m_choch: true,
+      require_5m_sweep: true,
+      require_5m_bos: true,
+      sl_mode: 'origin_candle',
+      sl_buffer_atr: 0.15,
+      tp_mode: 'trend_high',
+      fixed_rr: 3.5,
+      show_hud_table: true,
+      color_4h_demand: '#26a69a',
+      color_1h_refined: '#10b981',
+      color_30m_refined: '#00b4d8',
+      color_5m_entry: '#22c55e',
+      color_supply: '#ef5350'
+    },
+    paramDefinitions: [
+      { 
+        key: 'daily_mode', 
+        name: 'Daily Trend Confirmation Mode', 
+        type: 'select', 
+        default: 'hh_hl', 
+        options: [
+          { label: 'Market Structure (Higher Highs / Higher Lows)', value: 'hh_hl' },
+          { label: 'EMA 20/50 Trend Alignment', value: 'ema' },
+          { label: 'Combined Structure + EMA Alignment', value: 'both' }
+        ],
+        category: 'Calculations',
+        description: 'Determines the Daily macro trend bias. Only searches for Demand/BUY when bullish, and Supply/SELL when bearish.'
+      },
+      { key: 'daily_lookback', name: 'Daily Pivot Lookback Bars', type: 'int', default: 5, min: 2, max: 20, category: 'Calculations' },
+      { key: 'daily_ema_filter', name: 'Confirm with Daily 50 EMA Filter', type: 'bool', default: true, category: 'Calculations' },
+      { key: 'only_trend_entries', name: 'Strict Trend Alignment (No Counter-Trend)', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'impulse_mult_4h', name: '4H Impulse Body ATR Multiplier', type: 'float', default: 1.25, min: 1.0, max: 3.0, step: 0.05, category: 'Calculations', description: 'Sensitivity to detect strong institutional displacement moves breaking structure.' },
+      { key: 'check_unmitigated', name: 'Require Fresh/Unmitigated Zones', type: 'bool', default: true, category: 'Calculations' },
+      { key: 'refine_1h', name: 'Refine Zone in 1H Timeframe', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'refine_30m', name: 'Refine Zone in 30M Timeframe', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'require_15m_choch', name: 'Wait for 15M Structure Change (CHoCH)', type: 'bool', default: true, category: 'Directions & Signals', description: 'Prevents premature entry when price touches 4H zone. Waits for 15M lower high break.' },
+      { key: 'require_5m_sweep', name: 'Require 5M Liquidity Sweep', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'require_5m_bos', name: 'Require 5M Displacement & BOS', type: 'bool', default: true, category: 'Directions & Signals' },
+      { 
+        key: 'sl_mode', 
+        name: 'Stop Loss Placement Mode', 
+        type: 'select', 
+        default: 'origin_candle', 
+        options: [
+          { label: 'Option A: Bottom of 5M Origin Candle', value: 'origin_candle' },
+          { label: 'Option B: Bottom of Refined 5M Demand Zone', value: 'zone_low' }
+        ],
+        category: 'Calculations',
+        description: 'Choice between origin candle low or entire refined zone low.'
+      },
+      { key: 'sl_buffer_atr', name: 'Stop Loss ATR Buffer Multiplier', type: 'float', default: 0.15, min: 0.0, max: 1.0, step: 0.05, category: 'Calculations' },
+      { 
+        key: 'tp_mode', 
+        name: 'Take Profit Target Mode', 
+        type: 'select', 
+        default: 'trend_high', 
+        options: [
+          { label: 'Highest Point of Trend (Previous Swing High)', value: 'trend_high' },
+          { label: 'Nearest Opposing 4H Supply Zone', value: 'opposing_zone' },
+          { label: 'Fixed Risk:Reward Ratio', value: 'fixed_rr' }
+        ],
+        category: 'Calculations'
+      },
+      { key: 'fixed_rr', name: 'Fixed Risk:Reward Target (if selected)', type: 'float', default: 3.5, min: 1.0, max: 10.0, step: 0.5, category: 'Calculations' },
+      { key: 'allow_bullish', name: 'Allow Bullish Demand Setups', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'allow_bearish', name: 'Allow Bearish Supply Setups', type: 'bool', default: true, category: 'Directions & Signals' },
+      { key: 'show_hud_table', name: 'Display Multi-Timeframe Status HUD Card', type: 'bool', default: true, category: 'Visuals' },
+      { key: 'color_4h_demand', name: '4H Major Demand Color', type: 'color', default: '#26a69a', category: 'Visuals' },
+      { key: 'color_1h_refined', name: '1H Refined Demand Color', type: 'color', default: '#10b981', category: 'Visuals' },
+      { key: 'color_30m_refined', name: '30M Refined Demand Color', type: 'color', default: '#00b4d8', category: 'Visuals' },
+      { key: 'color_5m_entry', name: '5M Entry Zone Color', type: 'color', default: '#22c55e', category: 'Visuals' },
+      { key: 'color_supply', name: 'Supply Zone Color (Bearish)', type: 'color', default: '#ef5350', category: 'Visuals' }
+    ],
+    code: `//@version=5
+indicator("Top-Down MTF Demand + Structure Confirmation", shorttitle="MTF Demand Conf", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+
+// 1. Inputs
+daily_mode = input.string("hh_hl", "Daily Trend Mode", options=["hh_hl", "ema", "both"], group="Daily Bias")
+daily_lookback = input.int(5, "Daily Pivot Lookback", minval=2, maxval=20, group="Daily Bias")
+only_trend = input.bool(true, "Strict Trend (No Counter-Trend)", group="Daily Bias")
+impulse_4h = input.float(1.25, "4H Impulse ATR Multiplier", minval=1.0, maxval=3.0, step=0.05, group="4H Zone")
+refine_1h = input.bool(true, "Refine in 1H", group="Refinement")
+refine_30m = input.bool(true, "Refine in 30M", group="Refinement")
+req_15m_choch = input.bool(true, "Require 15M CHoCH", group="LTF Confirmation")
+req_5m_bos = input.bool(true, "Require 5M Sweep + BOS", group="LTF Confirmation")
+sl_mode = input.string("origin_candle", "SL Mode", options=["origin_candle", "zone_low"], group="Execution")
+sl_buffer = input.float(0.15, "SL Buffer ATR", minval=0.0, maxval=1.0, step=0.05, group="Execution")
+tp_mode = input.string("trend_high", "TP Target", options=["trend_high", "opposing_zone", "fixed_rr"], group="Execution")
+fixed_rr = input.float(3.5, "Fixed R:R Ratio", minval=1.0, maxval=10.0, step=0.5, group="Execution")
+
+// 2. Non-Repainting MTF Data Retrieval
+[d_open, d_high, d_low, d_close] = request.security(syminfo.tickerid, "D", [open[1], high[1], low[1], close[1]], lookahead=barmerge.lookahead_off)
+d_atr = request.security(syminfo.tickerid, "D", ta.atr(14)[1], lookahead=barmerge.lookahead_off)
+d_ema20 = request.security(syminfo.tickerid, "D", ta.ema(close, 20)[1], lookahead=barmerge.lookahead_off)
+d_ema50 = request.security(syminfo.tickerid, "D", ta.ema(close, 50)[1], lookahead=barmerge.lookahead_off)
+
+[h4_open, h4_high, h4_low, h4_close] = request.security(syminfo.tickerid, "240", [open[1], high[1], low[1], close[1]], lookahead=barmerge.lookahead_off)
+h4_atr = request.security(syminfo.tickerid, "240", ta.atr(14)[1], lookahead=barmerge.lookahead_off)
+
+[h1_open, h1_high, h1_low, h1_close] = request.security(syminfo.tickerid, "60", [open[1], high[1], low[1], close[1]], lookahead=barmerge.lookahead_off)
+[m30_open, m30_high, m30_low, m30_close] = request.security(syminfo.tickerid, "30", [open[1], high[1], low[1], close[1]], lookahead=barmerge.lookahead_off)
+
+[m15_high, m15_low, m15_close] = request.security(syminfo.tickerid, "15", [high[1], low[1], close[1]], lookahead=barmerge.lookahead_off)
+[m5_high, m5_low, m5_close] = request.security(syminfo.tickerid, "5", [high[1], low[1], close[1]], lookahead=barmerge.lookahead_off)
+
+// 3. Daily Trend Bias
+daily_bull = d_close > d_ema50 and d_ema20 >= d_ema50
+daily_bear = d_close < d_ema50 and d_ema20 <= d_ema50
+
+// 4. 4H Major Zone (Base -> Displacement -> BOS)
+var float z4_top = na
+var float z4_bot = na
+var string z4_type = "NONE"
+
+h4_disp_bull = (h4_close - h4_open) >= h4_atr * impulse_4h and h4_close > h4_high[1]
+h4_disp_bear = (h4_open - h4_close) >= h4_atr * impulse_4h and h4_close < h4_low[1]
+
+if daily_bull and h4_disp_bull
+    z4_bot := h4_low[1]
+    z4_top := math.max(h4_open[1], h4_close[1])
+    z4_type := "DEMAND"
+
+if daily_bear and h4_disp_bear
+    z4_top := h4_high[1]
+    z4_bot := math.min(h4_open[1], h4_close[1])
+    z4_type := "SUPPLY"
+
+// 5. 1H & 30M Refinement
+var float z_act_top = na
+var float z_act_bot = na
+z_act_top := z4_top
+z_act_bot := z4_bot
+
+if not na(z4_top) and refine_1h
+    if z4_type == "DEMAND" and h1_low >= z4_bot and h1_low <= z4_top
+        z_act_bot := math.max(z4_bot, h1_low)
+        z_act_top := math.min(z4_top, math.max(h1_open, h1_close))
+
+if not na(z_act_top) and refine_30m
+    if z4_type == "DEMAND" and m30_low >= z_act_bot and m30_low <= z_act_top
+        z_act_bot := math.max(z_act_bot, m30_low)
+        z_act_top := math.min(z_act_top, math.max(m30_open, m30_close))
+
+// 6. State Machine: Retest -> 15M CHoCH -> 5M BOS -> Entry
+var int state = 0
+var float entry_p = na
+var float sl_p = na
+var float tp_p = na
+
+price_in_zone = not na(z_act_top) and low <= z_act_top and high >= z_act_bot
+
+if not na(z4_top) and state == 0
+    state := 1 // Zone Ready
+
+if state == 1 and price_in_zone
+    state := 2 // Price Entered Zone -> Wait 15M
+
+m15_choch = state == 2 and ((z4_type == "DEMAND" and m15_close > ta.highest(m15_high[1], 4)) or not req_15m_choch)
+if m15_choch
+    state := 3 // 15M Confirmed -> Wait 5M
+
+m5_bos = state == 3 and ((z4_type == "DEMAND" and m5_close > ta.highest(m5_high[1], 3)) or not req_5m_bos)
+buy_setup = state == 3 and m5_bos and z4_type == "DEMAND"
+
+if buy_setup and na(entry_p)
+    state := 4 // Setup Active
+    entry_p := close
+    origin_low = ta.lowest(low, 3)
+    sl_p := sl_mode == "origin_candle" ? origin_low - ta.atr(14) * sl_buffer : z_act_bot - ta.atr(14) * sl_buffer
+    trend_high = ta.highest(high, 60)
+    tp_p := tp_mode == "trend_high" ? trend_high : (entry_p + (entry_p - sl_p) * fixed_rr)
+
+if state == 4 and (high >= tp_p or low <= sl_p)
+    state := 0
+    entry_p := na
+
+// 7. Visual Outputs & Alerts
+plot(state == 4 ? entry_p : na, "Entry", color=color.blue, linewidth=2, style=plot.style_linebr)
+plot(state == 4 ? sl_p : na, "Stop Loss", color=color.red, linewidth=2, style=plot.style_linebr)
+plot(state == 4 ? tp_p : na, "Take Profit", color=color.green, linewidth=2, style=plot.style_linebr)
+
+plotshape(buy_setup, "BUY Setup", shape.labelup, location.belowbar, color=#22c55e, text="BUY SETUP", textcolor=color.white, size=size.normal)
+
+alertcondition(buy_setup, "BUY Setup Triggered", "MTF Top-Down Demand Buy Setup triggered!")
+alertcondition(price_in_zone, "Price In Zone", "Price entered demand zone!")
+alertcondition(state == 4 and high >= tp_p, "Take Profit Hit", "Target reached!")
+alertcondition(state == 4 and low <= sl_p, "Stop Loss Hit", "Stop loss hit.")`
   }
 ];
 

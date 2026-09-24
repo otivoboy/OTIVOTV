@@ -26,6 +26,7 @@ import { OtivoPreloader } from '../Common/OtivoPreloader';
 import { OscillatorPanel } from './OscillatorPanel';
 import { IndicatorSettingsModal } from './IndicatorSettingsModal';
 import { DrawingSettingsModal } from './DrawingSettingsModal';
+import { TopDownStrategyHUD } from './TopDownStrategyHUD';
 import { generateSeedCandles, derivClient } from '../../lib/derivClient';
 
 import { 
@@ -1132,8 +1133,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               ctx.textBaseline = 'middle';
               ctx.fillText(line.label, tagX + tagW / 2, tagY + tagH / 2);
             } else if (line.label && x2 >= -20 && x2 <= width + 50) {
-              // Quant Target Line Tag (TP1, TP2, SL, ENTRY, etc.)
-              const isQuantTarget = line.label.startsWith('TP') || line.label.startsWith('SL') || line.label.startsWith('ENTRY');
+              // Quant Target Line Tag (TP1, TP2, SL, ENTRY, CHoCH, BOS, etc.)
+              const isQuantTarget = line.label.startsWith('TP') || line.label.startsWith('SL') || line.label.startsWith('ENTRY') || line.label.includes('CHoCH') || line.label.includes('BOS');
               
               if (isQuantTarget) {
                 ctx.font = 'bold 9.5px "JetBrains Mono", monospace';
@@ -1405,7 +1406,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                   ctx.fillStyle = isDark ? '#d1d4dc' : '#131722';
                   ctx.textAlign = 'left';
                   ctx.fillText('FVG', bx + bw + 4, by + bh / 2 + 3.5);
-                } else if (box.label.includes('Session') || box.label.includes('(Live)')) {
+                } else if (box.label.includes('Session') || box.label.includes('(Live)') || box.label.includes('DEMAND') || box.label.includes('SUPPLY') || box.label.includes('REFINED') || box.label.includes('ENTRY')) {
                   const labelX = Math.max(bx + 6, 8);
                   if (labelX < width - 60) {
                     ctx.font = 'bold 9.5px "JetBrains Mono", Inter, sans-serif';
@@ -5855,6 +5856,20 @@ export const TradingChart: React.FC<TradingChartProps> = ({
           )}
         </div>
       </div>
+
+      {/* Top-Down MTF Demand Confirmation Strategy HUD */}
+      {(() => {
+        const topDownOutput = indicatorData.find(d => d.topDownState !== undefined);
+        if (!topDownOutput?.topDownState) return null;
+        return (
+          <TopDownStrategyHUD
+            indicatorId={topDownOutput.id}
+            state={topDownOutput.topDownState}
+            symbol={effectiveSymbol}
+            onOpenSettings={setSelectedIndicatorForSettings}
+          />
+        );
+      })()}
       </div>
 
       {/* Dedicated Oscillator Sub-Panels (e.g. RSI, Delta) */}

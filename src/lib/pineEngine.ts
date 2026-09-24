@@ -1,5 +1,7 @@
 import { Candle } from '../types';
 import { BUILTIN_INDICATORS } from './indicatorsList';
+import { aggregateCandles } from './derivClient';
+import { useMarketStore } from '../store/useMarketStore';
 
 export function toRgba(col: string | undefined, alpha: number, fallback: string = 'rgba(0,0,0,0.1)'): string {
   if (!col || col === 'transparent' || col === 'none') return 'transparent';
@@ -187,6 +189,64 @@ export interface IndicatorTable {
   rows: IndicatorTableCell[][];
 }
 
+export interface TopDownIndicatorState {
+  dailyTrend: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+  dailyReason: string;
+  dailySwingHigh: number | null;
+  dailySwingLow: number | null;
+  fourHZone: {
+    top: number;
+    bottom: number;
+    type: 'DEMAND' | 'SUPPLY';
+    startTime: number;
+    isMitigated: boolean;
+  } | null;
+  oneHZone: {
+    top: number;
+    bottom: number;
+  } | null;
+  thirtyMZone: {
+    top: number;
+    bottom: number;
+  } | null;
+  activeTargetZone: {
+    top: number;
+    bottom: number;
+    timeframe: string;
+  } | null;
+  state: 'IDLE' | 'SCANNING_DAILY' | '4H_ZONE_FOUND' | 'REFINING_1H_30M' | 'WAITING_FOR_RETEST' | 'PRICE_IN_ZONE' | 'WAITING_15M_CHOCH' | 'WAITING_5M_BOS' | 'SETUP_ACTIVE' | 'TP_HIT' | 'SL_HIT';
+  stateTitle: string;
+  stateDesc: string;
+  currentStep: number;
+  totalSteps: number;
+  fifteenMChoch: {
+    price: number;
+    time: number;
+    confirmed: boolean;
+  } | null;
+  fiveMBos: {
+    price: number;
+    time: number;
+    confirmed: boolean;
+  } | null;
+  fiveMZone: {
+    top: number;
+    bottom: number;
+    time: number;
+  } | null;
+  setup: {
+    active: boolean;
+    type: 'BUY' | 'SELL';
+    entryPrice: number;
+    slPrice: number;
+    tpPrice: number;
+    rr: number;
+    status: 'ACTIVE' | 'TP_HIT' | 'SL_HIT' | 'INVALIDATED';
+    slMode: string;
+    tpMode: string;
+  } | null;
+}
+
 export interface IndicatorOutput {
   id: string;
   name: string;
@@ -208,6 +268,7 @@ export interface IndicatorOutput {
   backgroundColorZones: { start: number; end: number | null; color: string; label?: string }[];
   currentEntryPrice?: number | null;
   params?: Record<string, any>;
+  topDownState?: TopDownIndicatorState;
 }
 
 // Technical Analysis Helpers
@@ -1282,6 +1343,877 @@ export function runPineEngine(
         label: 'Cumulative Volume Delta'
       }));
       output.plots.push(cvdPlot);
+    }
+
+    return output;
+  }
+
+  // =========================================================================
+  // 3.5. TOP-DOWN MULTI-TIMEFRAME DEMAND + STRUCTURE CONFIRMATION
+  // =========================================================================
+  if (
+    idLower.includes('top_down') ||
+    idLower.includes('top down') ||
+    idLower.includes('mtf_demand') ||
+    idLower.includes('demand_confirmation') ||
+    idLower.includes('mtf demand') ||
+    indicator.name.toLowerCase().includes('top-down') ||
+    indicator.name.toLowerCase().includes('demand + structure')
+  ) {
+    // 1. Inputs & Configuration
+    const dailyMode = params.daily_mode || 'hh_hl';
+    const dailyLookback = Math.max(2, Math.min(20, params.daily_lookback ?? 5));
+    const dailyEmaFilter = params.daily_ema_filter ?? true;
+    const onlyTrendEntries = params.only_trend_entries ?? true;
+    const allowBullish = params.allow_bullish ?? true;
+    const allowBearish = params.allow_bearish ?? true;
+
+    const impulseMult4h = Math.max(1.0, Math.min(3.0, params.impulse_mult_4h ?? 1.25));
+    const checkUnmitigated = params.check_unmitigated ?? true;
+    const refine1h = params.refine_1h ?? true;
+    const refine30m = params.refine_30m ?? true;
+
+    const require15mChoch = params.require_15m_choch ?? true;
+    const require5mSweep = params.require_5m_sweep ?? true;
+    const require5mBos = params.require_5m_bos ?? true;
+
+    const slMode = params.sl_mode || 'origin_candle';
+    const slBufferAtr = Math.max(0.0, Math.min(1.0, params.sl_buffer_atr ?? 0.15));
+    const tpMode = params.tp_mode || 'trend_high';
+    const fixedRr = Math.max(1.0, Math.min(10.0, params.fixed_rr ?? 3.5));
+    const showHudTable = params.show_hud_table ?? true;
+
+    const color4hDemand = params.color_4h_demand || '#26a69a';
+    const color1hRefined = params.color_1h_refined || '#10b981';
+    const color30mRefined = params.color_30m_refined || '#00b4d8';
+    const color5mEntry = params.color_5m_entry || '#22c55e';
+    const colorSupply = params.color_supply || '#ef5350';
+
+    // Helper: Safely retrieve candles for higher and lower timeframes
+    const store = useMarketStore.getState();
+    const tfStore = store?.candlesByTimeframe || {};
+
+    const getCandlesForTf = (tfKey: string, targetSec: number): Candle[] => {
+      if (tfStore[tfKey] && tfStore[tfKey].length >= 5) {
+        return tfStore[tfKey];
+      }
+      const currentInterval = candles.length > 1 ? Math.max(1, Math.abs(times[1] - times[0])) : 60;
+      if (targetSec > currentInterval && candles.length >= 8) {
+        const ag = aggregateCandles(candles, targetSec);
+        if (ag.length >= 3) return ag;
+      }
+      if (timeframe === tfKey) return candles;
+      return candles;
+    };
+
+    const dailyCandles = getCandlesForTf('1d', 86400);
+    const fourHCandles = getCandlesForTf('4h', 14400);
+    const oneHCandles = getCandlesForTf('1h', 3600);
+    const thirtyMCandles = getCandlesForTf('30m', 1800);
+    const fifteenMCandles = getCandlesForTf('15m', 900);
+    const fiveMCandles = getCandlesForTf('5m', 300);
+
+    const currentPrice = closePrices[closePrices.length - 1] ?? 0;
+    const latestTime = times[times.length - 1] ?? Math.floor(Date.now() / 1000);
+
+    // =========================================================================
+    // STEP 1: DAILY TREND & BIAS
+    // =========================================================================
+    const dCloses = dailyCandles.map(c => c.close);
+    const dHighs = dailyCandles.map(c => c.high);
+    const dLows = dailyCandles.map(c => c.low);
+    const dEma20 = TA.ema(dCloses, Math.min(20, Math.max(2, Math.floor(dCloses.length / 2))));
+    const dEma50 = TA.ema(dCloses, Math.min(50, Math.max(3, Math.floor(dCloses.length / 2))));
+
+    // Calculate daily swing highs & swing lows
+    const dSwingHighs: { idx: number; price: number }[] = [];
+    const dSwingLows: { idx: number; price: number }[] = [];
+    const dLook = Math.min(dailyLookback, Math.max(2, Math.floor(dailyCandles.length / 4)));
+
+    for (let i = dLook; i < dailyCandles.length - dLook; i++) {
+      let isHigh = true;
+      let isLow = true;
+      for (let j = 1; j <= dLook; j++) {
+        if (dHighs[i] <= dHighs[i - j] || dHighs[i] <= dHighs[i + j]) isHigh = false;
+        if (dLows[i] >= dLows[i - j] || dLows[i] >= dLows[i + j]) isLow = false;
+      }
+      if (isHigh) dSwingHighs.push({ idx: i, price: dHighs[i] });
+      if (isLow) dSwingLows.push({ idx: i, price: dLows[i] });
+    }
+
+    const lastDHigh = dSwingHighs.length > 0 ? dSwingHighs[dSwingHighs.length - 1].price : dHighs[dHighs.length - 1];
+    const prevDHigh = dSwingHighs.length > 1 ? dSwingHighs[dSwingHighs.length - 2].price : lastDHigh;
+    const lastDLow = dSwingLows.length > 0 ? dSwingLows[dSwingLows.length - 1].price : dLows[dLows.length - 1];
+    const prevDLow = dSwingLows.length > 1 ? dSwingLows[dSwingLows.length - 2].price : lastDLow;
+
+    const latestDEma20 = dEma20[dEma20.length - 1] ?? currentPrice;
+    const latestDEma50 = dEma50[dEma50.length - 1] ?? currentPrice;
+    const latestDClose = dCloses[dCloses.length - 1] ?? currentPrice;
+
+    let dailyTrend: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
+    let dailyReason = 'Structure consolidating';
+
+    const isStructBull = (lastDHigh > prevDHigh || dSwingHighs.length <= 1) && lastDLow >= prevDLow;
+    const isStructBear = (lastDLow < prevDLow || dSwingLows.length <= 1) && lastDHigh <= prevDHigh;
+    const isEmaBull = latestDClose >= latestDEma50 && latestDEma20 >= latestDEma50;
+    const isEmaBear = latestDClose <= latestDEma50 && latestDEma20 <= latestDEma50;
+
+    if (dailyMode === 'ema') {
+      if (isEmaBull && allowBullish) {
+        dailyTrend = 'BULLISH';
+        dailyReason = 'Daily Price > 50 EMA & 20 EMA > 50 EMA (Uptrend)';
+      } else if (isEmaBear && allowBearish) {
+        dailyTrend = 'BEARISH';
+        dailyReason = 'Daily Price < 50 EMA & 20 EMA < 50 EMA (Downtrend)';
+      }
+    } else if (dailyMode === 'both') {
+      if (isStructBull && isEmaBull && allowBullish) {
+        dailyTrend = 'BULLISH';
+        dailyReason = 'HH + HL Market Structure confirmed with Bullish EMA Alignment';
+      } else if (isStructBear && isEmaBear && allowBearish) {
+        dailyTrend = 'BEARISH';
+        dailyReason = 'LH + LL Market Structure confirmed with Bearish EMA Alignment';
+      }
+    } else {
+      // Default: Pure Market Structure (HH + HL vs LH + LL)
+      if (isStructBull && (!dailyEmaFilter || latestDClose >= latestDEma50 * 0.99) && allowBullish) {
+        dailyTrend = 'BULLISH';
+        dailyReason = 'Higher Highs (HH) + Higher Lows (HL) Market Structure';
+      } else if (isStructBear && (!dailyEmaFilter || latestDClose <= latestDEma50 * 1.01) && allowBearish) {
+        dailyTrend = 'BEARISH';
+        dailyReason = 'Lower Highs (LH) + Lower Lows (LL) Market Structure';
+      } else if (latestDClose >= latestDEma50 && allowBullish) {
+        dailyTrend = 'BULLISH';
+        dailyReason = 'Macro Bullish Trend above EMA Baseline';
+      } else if (allowBearish) {
+        dailyTrend = 'BEARISH';
+        dailyReason = 'Macro Bearish Trend below EMA Baseline';
+      }
+    }
+
+    // =========================================================================
+    // STEP 2: 4H MAJOR DEMAND / SUPPLY ZONE
+    // =========================================================================
+    const h4Highs = fourHCandles.map(c => c.high);
+    const h4Lows = fourHCandles.map(c => c.low);
+    const h4Opens = fourHCandles.map(c => c.open);
+    const h4Closes = fourHCandles.map(c => c.close);
+    const h4Times = fourHCandles.map(c => (typeof c.time === 'number' ? (c.time > 1e11 ? Math.floor(c.time / 1000) : c.time) : Math.floor(new Date(c.time as string).getTime() / 1000)));
+    const h4Atr = TA.atr(h4Highs, h4Lows, h4Closes, Math.min(14, Math.max(3, Math.floor(fourHCandles.length / 2))));
+
+    interface ZoneRecord {
+      top: number;
+      bottom: number;
+      startTime: number;
+      baseIdx: number;
+      impulseIdx: number;
+      type: 'DEMAND' | 'SUPPLY';
+      isMitigated: boolean;
+      score: number;
+    }
+
+    const discovered4hZones: ZoneRecord[] = [];
+
+    // Calculate baseline 4H body size
+    let sum4hBody = 0;
+    for (let k = 0; k < fourHCandles.length; k++) {
+      sum4hBody += Math.abs(h4Closes[k] - h4Opens[k]);
+    }
+    const avg4hBody = Math.max(1e-5, sum4hBody / Math.max(1, fourHCandles.length));
+
+    for (let i = 2; i < fourHCandles.length; i++) {
+      const curAtr = h4Atr[i] || avg4hBody;
+      const body = Math.abs(h4Closes[i] - h4Opens[i]);
+      const isImpulse = body >= curAtr * impulseMult4h;
+
+      // Bullish Demand Displacement on 4H
+      if (dailyTrend === 'BULLISH' && isImpulse && h4Closes[i] > h4Opens[i] && h4Closes[i] > h4Highs[i - 1]) {
+        let baseIdx = i - 1;
+        for (let b = i - 1; b >= Math.max(0, i - 5); b--) {
+          if (h4Closes[b] <= h4Opens[b]) {
+            baseIdx = b;
+            break;
+          }
+        }
+
+        const zBot = h4Lows[baseIdx];
+        let zTop = Math.max(h4Opens[baseIdx], h4Closes[baseIdx]);
+        if (zTop - zBot > avg4hBody * 2.2) {
+          zTop = zBot + avg4hBody * 1.6;
+        }
+
+        // Check if unmitigated
+        let isMitigated = false;
+        for (let j = i + 1; j < fourHCandles.length; j++) {
+          if (h4Lows[j] <= zBot) {
+            isMitigated = true;
+            break;
+          }
+        }
+
+        if (!checkUnmitigated || !isMitigated) {
+          discovered4hZones.push({
+            top: zTop,
+            bottom: zBot,
+            startTime: h4Times[baseIdx],
+            baseIdx,
+            impulseIdx: i,
+            type: 'DEMAND',
+            isMitigated,
+            score: (isMitigated ? 200 : 1500) + baseIdx
+          });
+        }
+      }
+
+      // Bearish Supply Displacement on 4H
+      if (dailyTrend === 'BEARISH' && isImpulse && h4Closes[i] < h4Opens[i] && h4Closes[i] < h4Lows[i - 1]) {
+        let baseIdx = i - 1;
+        for (let b = i - 1; b >= Math.max(0, i - 5); b--) {
+          if (h4Closes[b] >= h4Opens[b]) {
+            baseIdx = b;
+            break;
+          }
+        }
+
+        const zTop = h4Highs[baseIdx];
+        let zBot = Math.min(h4Opens[baseIdx], h4Closes[baseIdx]);
+        if (zTop - zBot > avg4hBody * 2.2) {
+          zBot = zTop - avg4hBody * 1.6;
+        }
+
+        let isMitigated = false;
+        for (let j = i + 1; j < fourHCandles.length; j++) {
+          if (h4Highs[j] >= zTop) {
+            isMitigated = true;
+            break;
+          }
+        }
+
+        if (!checkUnmitigated || !isMitigated) {
+          discovered4hZones.push({
+            top: zTop,
+            bottom: zBot,
+            startTime: h4Times[baseIdx],
+            baseIdx,
+            impulseIdx: i,
+            type: 'SUPPLY',
+            isMitigated,
+            score: (isMitigated ? 200 : 1500) + baseIdx
+          });
+        }
+      }
+    }
+
+    // Pick most relevant active 4H Zone
+    let active4hZone: ZoneRecord | null = null;
+    if (discovered4hZones.length > 0) {
+      discovered4hZones.sort((a, b) => b.score - a.score);
+      active4hZone = discovered4hZones[0];
+    } else if (fourHCandles.length >= 4) {
+      // Fallback: create zone from most recent swing trough / peak
+      const last4hIdx = Math.max(0, fourHCandles.length - 4);
+      if (dailyTrend === 'BULLISH') {
+        let lowestIdx = last4hIdx;
+        for (let k = last4hIdx; k < fourHCandles.length - 1; k++) {
+          if (h4Lows[k] <= h4Lows[lowestIdx]) lowestIdx = k;
+        }
+        active4hZone = {
+          top: Math.max(h4Opens[lowestIdx], h4Closes[lowestIdx]),
+          bottom: h4Lows[lowestIdx],
+          startTime: h4Times[lowestIdx],
+          baseIdx: lowestIdx,
+          impulseIdx: lowestIdx + 1,
+          type: 'DEMAND',
+          isMitigated: false,
+          score: 1000
+        };
+      } else {
+        let highestIdx = last4hIdx;
+        for (let k = last4hIdx; k < fourHCandles.length - 1; k++) {
+          if (h4Highs[k] >= h4Highs[highestIdx]) highestIdx = k;
+        }
+        active4hZone = {
+          top: h4Highs[highestIdx],
+          bottom: Math.min(h4Opens[highestIdx], h4Closes[highestIdx]),
+          startTime: h4Times[highestIdx],
+          baseIdx: highestIdx,
+          impulseIdx: highestIdx + 1,
+          type: 'SUPPLY',
+          isMitigated: false,
+          score: 1000
+        };
+      }
+    }
+
+    // =========================================================================
+    // STEP 3: 1H & 30M REFINEMENT
+    // =========================================================================
+    let refined1hZone: { top: number; bottom: number } | null = null;
+    let refined30mZone: { top: number; bottom: number } | null = null;
+
+    let targetTop = active4hZone ? active4hZone.top : currentPrice;
+    let targetBottom = active4hZone ? active4hZone.bottom : currentPrice;
+    let activeTfName = '4H';
+
+    if (active4hZone && refine1h && oneHCandles.length > 0) {
+      const h1Candidates: Candle[] = oneHCandles.filter(c => {
+        if (active4hZone!.type === 'DEMAND') {
+          return c.low >= active4hZone!.bottom * 0.999 && c.low <= active4hZone!.top;
+        } else {
+          return c.high <= active4hZone!.top * 1.001 && c.high >= active4hZone!.bottom;
+        }
+      });
+
+      if (h1Candidates.length > 0) {
+        // Find origin candle inside the 4H zone
+        const best1h = h1Candidates[h1Candidates.length - 1];
+        if (active4hZone.type === 'DEMAND') {
+          const rBot = Math.max(active4hZone.bottom, best1h.low);
+          const rTop = Math.min(active4hZone.top, Math.max(best1h.open, best1h.close));
+          if (rTop > rBot) {
+            refined1hZone = { top: rTop, bottom: rBot };
+            targetTop = rTop;
+            targetBottom = rBot;
+            activeTfName = '1H';
+          }
+        } else {
+          const rTop = Math.min(active4hZone.top, best1h.high);
+          const rBot = Math.max(active4hZone.bottom, Math.min(best1h.open, best1h.close));
+          if (rTop > rBot) {
+            refined1hZone = { top: rTop, bottom: rBot };
+            targetTop = rTop;
+            targetBottom = rBot;
+            activeTfName = '1H';
+          }
+        }
+      }
+    }
+
+    if (active4hZone && refine30m && thirtyMCandles.length > 0) {
+      const m30Candidates: Candle[] = thirtyMCandles.filter(c => {
+        if (active4hZone!.type === 'DEMAND') {
+          return c.low >= targetBottom * 0.999 && c.low <= targetTop;
+        } else {
+          return c.high <= targetTop * 1.001 && c.high >= targetBottom;
+        }
+      });
+
+      if (m30Candidates.length > 0) {
+        const best30m = m30Candidates[m30Candidates.length - 1];
+        if (active4hZone.type === 'DEMAND') {
+          const rBot = Math.max(targetBottom, best30m.low);
+          const rTop = Math.min(targetTop, Math.max(best30m.open, best30m.close));
+          if (rTop > rBot) {
+            refined30mZone = { top: rTop, bottom: rBot };
+            targetTop = rTop;
+            targetBottom = rBot;
+            activeTfName = '30M';
+          }
+        } else {
+          const rTop = Math.min(targetTop, best30m.high);
+          const rBot = Math.max(targetBottom, Math.min(best30m.open, best30m.close));
+          if (rTop > rBot) {
+            refined30mZone = { top: rTop, bottom: rBot };
+            targetTop = rTop;
+            targetBottom = rBot;
+            activeTfName = '30M';
+          }
+        }
+      }
+    }
+
+    // =========================================================================
+    // STEP 4 & 5: PRICE RETEST & 15M / 5M CONFIRMATION (STATE MACHINE)
+    // =========================================================================
+    let state: TopDownIndicatorState['state'] = 'IDLE';
+    let stateTitle = '1. Daily Trend Confirmed';
+    let stateDesc = dailyReason;
+    let currentStep = 1;
+    const totalSteps = 7;
+
+    let priceHasEntered = false;
+    let entryTimeOfZone = 0;
+
+    if (active4hZone) {
+      state = '4H_ZONE_FOUND';
+      currentStep = 2;
+      stateTitle = `2. ${active4hZone.type} Zone Established`;
+      stateDesc = `4H ${active4hZone.type} zone mapped from displacement surge.`;
+
+      if (refined1hZone || refined30mZone) {
+        state = 'REFINING_1H_30M';
+        currentStep = 3;
+        stateTitle = '3. Sniper Refinement Complete';
+        stateDesc = `Refined from 4H into ${activeTfName} zone (${targetBottom.toFixed(4)} - ${targetTop.toFixed(4)}).`;
+      }
+
+      // Check if price has entered the refined zone
+      const zoneStartIdx = Math.max(0, candles.findIndex(c => {
+        const cTime = typeof c.time === 'number' ? (c.time > 1e11 ? Math.floor(c.time / 1000) : c.time) : Math.floor(new Date(c.time as string).getTime() / 1000);
+        return cTime >= active4hZone!.startTime;
+      }));
+
+      for (let k = zoneStartIdx + 1; k < candles.length; k++) {
+        const isTouch = active4hZone.type === 'DEMAND'
+          ? (lowPrices[k] <= targetTop && highPrices[k] >= targetBottom)
+          : (highPrices[k] >= targetBottom && lowPrices[k] <= targetTop);
+        if (isTouch) {
+          priceHasEntered = true;
+          entryTimeOfZone = times[k];
+          break;
+        }
+      }
+
+      if (!priceHasEntered) {
+        state = 'WAITING_FOR_RETEST';
+        currentStep = 4;
+        stateTitle = '4. Waiting for Price Retest';
+        stateDesc = 'NO ENTRY YET. Waiting for price to pull back into the institutional demand zone.';
+      } else {
+        state = 'PRICE_IN_ZONE';
+        currentStep = 4;
+        stateTitle = '4. Price Entered Demand Zone';
+        stateDesc = 'CRITICAL: NO BUY SIGNAL YET! Waiting for lower-timeframe structure change.';
+      }
+    }
+
+    // =========================================================================
+    // STEP 5: 15M MARKET STRUCTURE CHANGE (CHoCH / BOS)
+    // =========================================================================
+    let fifteenMChochData: TopDownIndicatorState['fifteenMChoch'] = null;
+
+    if (priceHasEntered && active4hZone) {
+      const m15Closes = fifteenMCandles.map(c => c.close);
+      const m15Highs = fifteenMCandles.map(c => c.high);
+      const m15Lows = fifteenMCandles.map(c => c.low);
+      const m15Times = fifteenMCandles.map(c => (typeof c.time === 'number' ? (c.time > 1e11 ? Math.floor(c.time / 1000) : c.time) : Math.floor(new Date(c.time as string).getTime() / 1000)));
+
+      // Find 15M Lower High (for Demand) or Higher Low (for Supply)
+      let chochFound = false;
+      let chochPrice = 0;
+      let chochTime = 0;
+
+      for (let i = Math.max(3, fifteenMCandles.length - 25); i < fifteenMCandles.length; i++) {
+        if (active4hZone.type === 'DEMAND') {
+          // Look for recent swing high on 15M that gets broken
+          const prevHigh = Math.max(...m15Highs.slice(Math.max(0, i - 4), i));
+          if (m15Closes[i] > prevHigh) {
+            chochFound = true;
+            chochPrice = prevHigh;
+            chochTime = m15Times[i];
+            break;
+          }
+        } else {
+          const prevLow = Math.min(...m15Lows.slice(Math.max(0, i - 4), i));
+          if (m15Closes[i] < prevLow) {
+            chochFound = true;
+            chochPrice = prevLow;
+            chochTime = m15Times[i];
+            break;
+          }
+        }
+      }
+
+      if (chochFound || !require15mChoch) {
+        fifteenMChochData = {
+          price: chochPrice || (active4hZone.type === 'DEMAND' ? targetTop : targetBottom),
+          time: chochTime || latestTime,
+          confirmed: true
+        };
+        state = 'WAITING_5M_BOS';
+        currentStep = 5;
+        stateTitle = '5. 15M CHoCH Confirmed';
+        stateDesc = 'Sellers lost control! 15M break of structure confirmed. Watching 5M execution.';
+      } else {
+        state = 'WAITING_15M_CHOCH';
+        currentStep = 5;
+        stateTitle = '5. Waiting for 15M CHoCH';
+        stateDesc = 'Price in zone: monitoring 15M for market structure shift (break above lower high).';
+      }
+    }
+
+    // =========================================================================
+    // STEP 6: 5M CONFIRMATION & REFINED 5M ENTRY ZONE CREATION
+    // =========================================================================
+    let fiveMBosData: TopDownIndicatorState['fiveMBos'] = null;
+    let fiveMZoneData: TopDownIndicatorState['fiveMZone'] = null;
+    let setupData: TopDownIndicatorState['setup'] = null;
+
+    if (fifteenMChochData && fifteenMChochData.confirmed && active4hZone) {
+      const m5Closes = fiveMCandles.map(c => c.close);
+      const m5Opens = fiveMCandles.map(c => c.open);
+      const m5Highs = fiveMCandles.map(c => c.high);
+      const m5Lows = fiveMCandles.map(c => c.low);
+      const m5Times = fiveMCandles.map(c => (typeof c.time === 'number' ? (c.time > 1e11 ? Math.floor(c.time / 1000) : c.time) : Math.floor(new Date(c.time as string).getTime() / 1000)));
+      const m5Atr = TA.atr(m5Highs, m5Lows, m5Closes, 14);
+
+      let bosFound = false;
+      let bosPrice = 0;
+      let bosTime = 0;
+      let originCandleIdx = fiveMCandles.length - 2;
+
+      for (let i = Math.max(3, fiveMCandles.length - 20); i < fiveMCandles.length; i++) {
+        const curAtr = m5Atr[i] || (currentPrice * 0.001);
+        const body = Math.abs(m5Closes[i] - m5Opens[i]);
+
+        if (active4hZone.type === 'DEMAND') {
+          const prev5mHigh = Math.max(...m5Highs.slice(Math.max(0, i - 3), i));
+          if (m5Closes[i] > prev5mHigh && body >= curAtr * 0.9) {
+            bosFound = true;
+            bosPrice = prev5mHigh;
+            bosTime = m5Times[i];
+            originCandleIdx = Math.max(0, i - 1);
+            break;
+          }
+        } else {
+          const prev5mLow = Math.min(...m5Lows.slice(Math.max(0, i - 3), i));
+          if (m5Closes[i] < prev5mLow && body >= curAtr * 0.9) {
+            bosFound = true;
+            bosPrice = prev5mLow;
+            bosTime = m5Times[i];
+            originCandleIdx = Math.max(0, i - 1);
+            break;
+          }
+        }
+      }
+
+      if (bosFound || !require5mBos) {
+        const originCandle = fiveMCandles[originCandleIdx] || fiveMCandles[fiveMCandles.length - 1];
+        fiveMBosData = {
+          price: bosPrice || (active4hZone.type === 'DEMAND' ? targetTop : targetBottom),
+          time: bosTime || latestTime,
+          confirmed: true
+        };
+
+        const f5Bot = active4hZone.type === 'DEMAND' ? originCandle.low : Math.min(originCandle.open, originCandle.close);
+        const f5Top = active4hZone.type === 'DEMAND' ? Math.max(originCandle.open, originCandle.close) : originCandle.high;
+
+        fiveMZoneData = {
+          bottom: f5Bot,
+          top: f5Top,
+          time: m5Times[originCandleIdx] || latestTime
+        };
+
+        // =========================================================================
+        // STEP 7: TRADE EXECUTION PLAN (ENTRY, STOP LOSS, TAKE PROFIT, R:R)
+        // =========================================================================
+        const atrValue = m5Atr[m5Atr.length - 1] || (currentPrice * 0.0015);
+        const buffer = atrValue * slBufferAtr;
+
+        const isDemand = active4hZone.type === 'DEMAND';
+        const entryPrice = isDemand ? f5Top : f5Bot;
+
+        let slPrice = isDemand
+          ? (slMode === 'origin_candle' ? (originCandle.low - buffer) : (f5Bot - buffer))
+          : (slMode === 'origin_candle' ? (originCandle.high + buffer) : (f5Top + buffer));
+
+        // Safety check on SL
+        if (isDemand && slPrice >= entryPrice) slPrice = entryPrice - buffer;
+        if (!isDemand && slPrice <= entryPrice) slPrice = entryPrice + buffer;
+
+        // Take Profit: "highest point of the trend"
+        let tpPrice = 0;
+        if (tpMode === 'fixed_rr') {
+          tpPrice = isDemand
+            ? entryPrice + Math.abs(entryPrice - slPrice) * fixedRr
+            : entryPrice - Math.abs(entryPrice - slPrice) * fixedRr;
+        } else {
+          // Find preceding significant 4H / Daily swing high
+          const trendHigh = Math.max(...h4Highs.slice(Math.max(0, h4Highs.length - 40)));
+          const trendLow = Math.min(...h4Lows.slice(Math.max(0, h4Lows.length - 40)));
+          tpPrice = isDemand ? Math.max(trendHigh, entryPrice + Math.abs(entryPrice - slPrice) * 2.5) : Math.min(trendLow, entryPrice - Math.abs(entryPrice - slPrice) * 2.5);
+        }
+
+        const risk = Math.max(1e-6, Math.abs(entryPrice - slPrice));
+        const reward = Math.max(1e-6, Math.abs(tpPrice - entryPrice));
+        const rr = parseFloat((reward / risk).toFixed(2));
+
+        let setupStatus: TopDownIndicatorState['setup']['status'] = 'ACTIVE';
+        if (isDemand) {
+          if (currentPrice >= tpPrice) setupStatus = 'TP_HIT';
+          else if (currentPrice <= slPrice) setupStatus = 'SL_HIT';
+        } else {
+          if (currentPrice <= tpPrice) setupStatus = 'TP_HIT';
+          else if (currentPrice >= slPrice) setupStatus = 'SL_HIT';
+        }
+
+        setupData = {
+          active: true,
+          type: isDemand ? 'BUY' : 'SELL',
+          entryPrice,
+          slPrice,
+          tpPrice,
+          rr,
+          status: setupStatus,
+          slMode: slMode === 'origin_candle' ? 'Origin Candle Low' : '5M Zone Low',
+          tpMode: tpMode === 'trend_high' ? 'Trend Highest Point' : `Fixed ${fixedRr}:1 R:R`
+        };
+
+        if (setupStatus === 'TP_HIT') {
+          state = 'TP_HIT';
+          currentStep = 7;
+          stateTitle = '🎯 Target Reached (+R:R)';
+          stateDesc = `Take Profit hit at ${tpPrice.toFixed(4)}! Setup successfully completed.`;
+        } else if (setupStatus === 'SL_HIT') {
+          state = 'SL_HIT';
+          currentStep = 7;
+          stateTitle = '❌ Stop Loss Hit (Invalidated)';
+          stateDesc = `Setup stopped out at ${slPrice.toFixed(4)}. Waiting for fresh daily structure.`;
+        } else {
+          state = 'SETUP_ACTIVE';
+          currentStep = 7;
+          stateTitle = `🚀 ${isDemand ? 'BUY' : 'SELL'} Setup Active (R:R 1:${rr})`;
+          stateDesc = `Entry: ${entryPrice.toFixed(4)} | SL: ${slPrice.toFixed(4)} | TP: ${tpPrice.toFixed(4)} | 1:${rr} R:R`;
+        }
+      }
+    }
+
+    // Save TopDownIndicatorState for React UI Components
+    output.topDownState = {
+      dailyTrend,
+      dailyReason,
+      dailySwingHigh: lastDHigh,
+      dailySwingLow: lastDLow,
+      fourHZone: active4hZone ? {
+        top: active4hZone.top,
+        bottom: active4hZone.bottom,
+        type: active4hZone.type,
+        startTime: active4hZone.startTime,
+        isMitigated: active4hZone.isMitigated
+      } : null,
+      oneHZone: refined1hZone,
+      thirtyMZone: refined30mZone,
+      activeTargetZone: active4hZone ? {
+        top: targetTop,
+        bottom: targetBottom,
+        timeframe: activeTfName
+      } : null,
+      state,
+      stateTitle,
+      stateDesc,
+      currentStep,
+      totalSteps,
+      fifteenMChoch: fifteenMChochData,
+      fiveMBos: fiveMBosData,
+      fiveMZone: fiveMZoneData,
+      setup: setupData
+    };
+
+    // =========================================================================
+    // VISUALS: BOXES, LINES, LABELS, TABLES & SIGNALS
+    // =========================================================================
+    // 1. 4H Major Zone Box
+    if (active4hZone && params.show_4h_zones !== false) {
+      const isDem = active4hZone.type === 'DEMAND';
+      const bColor = isDem ? toRgba(color4hDemand, 0.15, 'rgba(38,166,154,0.15)') : toRgba(colorSupply, 0.15, 'rgba(239,83,80,0.15)');
+      const borderColor = isDem ? color4hDemand : colorSupply;
+
+      output.boxes.push({
+        id: 'box-4h-major',
+        x1: active4hZone.startTime,
+        y1: active4hZone.top,
+        x2: latestTime,
+        y2: active4hZone.bottom,
+        color: bColor,
+        bordercolor: borderColor,
+        label: `4H ${active4hZone.type} [${active4hZone.bottom.toFixed(2)} - ${active4hZone.top.toFixed(2)}]`
+      });
+    }
+
+    // 2. 1H Refined Zone Box
+    if (refined1hZone && active4hZone) {
+      output.boxes.push({
+        id: 'box-1h-refined',
+        x1: active4hZone.startTime,
+        y1: refined1hZone.top,
+        x2: latestTime,
+        y2: refined1hZone.bottom,
+        color: toRgba(color1hRefined, 0.22, 'rgba(16,185,129,0.22)'),
+        bordercolor: color1hRefined,
+        borderstyle: 'dashed',
+        label: `1H REFINED [${refined1hZone.bottom.toFixed(2)} - ${refined1hZone.top.toFixed(2)}]`
+      });
+    }
+
+    // 3. 30M Refined Zone Box
+    if (refined30mZone && active4hZone) {
+      output.boxes.push({
+        id: 'box-30m-refined',
+        x1: active4hZone.startTime,
+        y1: refined30mZone.top,
+        x2: latestTime,
+        y2: refined30mZone.bottom,
+        color: toRgba(color30mRefined, 0.32, 'rgba(0,180,216,0.32)'),
+        bordercolor: color30mRefined,
+        borderstyle: 'solid',
+        label: `30M REFINED [${refined30mZone.bottom.toFixed(2)} - ${refined30mZone.top.toFixed(2)}]`
+      });
+    }
+
+    // 4. 5M Refined Entry Zone Box
+    if (fiveMZoneData) {
+      output.boxes.push({
+        id: 'box-5m-entry-zone',
+        x1: fiveMZoneData.time,
+        y1: fiveMZoneData.top,
+        x2: latestTime,
+        y2: fiveMZoneData.bottom,
+        color: toRgba(color5mEntry, 0.45, 'rgba(34,197,94,0.45)'),
+        bordercolor: color5mEntry,
+        borderstyle: 'solid',
+        label: `5M ENTRY ZONE [${fiveMZoneData.bottom.toFixed(2)} - ${fiveMZoneData.top.toFixed(2)}]`
+      });
+    }
+
+    // 5. 15M CHoCH Line
+    if (fifteenMChochData && fifteenMChochData.confirmed) {
+      output.lines.push({
+        id: 'line-15m-choch',
+        x1: fifteenMChochData.time,
+        y1: fifteenMChochData.price,
+        x2: latestTime,
+        y2: fifteenMChochData.price,
+        color: '#00b4d8',
+        width: 1.5,
+        style: 'dashed',
+        label: '15M CHoCH ↑'
+      });
+    }
+
+    // 6. 5M BOS Line
+    if (fiveMBosData && fiveMBosData.confirmed) {
+      output.lines.push({
+        id: 'line-5m-bos',
+        x1: fiveMBosData.time,
+        y1: fiveMBosData.price,
+        x2: latestTime,
+        y2: fiveMBosData.price,
+        color: '#22c55e',
+        width: 1.8,
+        style: 'solid',
+        label: '5M BOS ↑'
+      });
+    }
+
+    // 7. Setup Trade Execution Projection Lines (Entry, SL, TP)
+    if (setupData) {
+      const isLong = setupData.type === 'BUY';
+      const entryCol = isLong ? '#2962ff' : '#f59e0b';
+      const slCol = '#ef4444';
+      const tpCol = '#10b981';
+
+      output.lines.push({
+        id: 'setup-entry-line',
+        x1: fiveMBosData ? fiveMBosData.time : latestTime - 3600,
+        y1: setupData.entryPrice,
+        x2: latestTime,
+        y2: setupData.entryPrice,
+        color: entryCol,
+        width: 2,
+        style: 'solid',
+        label: `ENTRY: ${setupData.entryPrice.toFixed(2)}`
+      });
+
+      output.lines.push({
+        id: 'setup-sl-line',
+        x1: fiveMBosData ? fiveMBosData.time : latestTime - 3600,
+        y1: setupData.slPrice,
+        x2: latestTime,
+        y2: setupData.slPrice,
+        color: slCol,
+        width: 2,
+        style: 'dashed',
+        label: `SL: ${setupData.slPrice.toFixed(2)}`
+      });
+
+      output.lines.push({
+        id: 'setup-tp-line',
+        x1: fiveMBosData ? fiveMBosData.time : latestTime - 3600,
+        y1: setupData.tpPrice,
+        x2: latestTime,
+        y2: setupData.tpPrice,
+        color: tpCol,
+        width: 2,
+        style: 'solid',
+        label: `TP: ${setupData.tpPrice.toFixed(2)} (R:R 1:${setupData.rr})`
+      });
+
+      // Signal Marker
+      output.signals.push({
+        time: fiveMBosData ? fiveMBosData.time : latestTime,
+        type: isLong ? 'BUY' : 'SELL',
+        price: setupData.entryPrice,
+        comment: `${isLong ? 'BUY' : 'SELL'} Setup (R:R 1:${setupData.rr})`
+      });
+
+      output.labels.push({
+        id: 'setup-entry-label',
+        x: fiveMBosData ? fiveMBosData.time : latestTime,
+        y: setupData.entryPrice,
+        text: `ENTER ${setupData.type} (1:${setupData.rr} R:R)`,
+        color: isLong ? '#22c55e' : '#ef4444',
+        textcolor: '#ffffff',
+        badge: true
+      });
+    }
+
+    // 8. Daily Trend Banner Label
+    output.labels.push({
+      id: 'daily-trend-tag',
+      x: latestTime,
+      y: (lastDHigh || currentPrice) * 1.002,
+      text: `DAILY TREND: ${dailyTrend} ↑`,
+      color: dailyTrend === 'BULLISH' ? '#10b981' : (dailyTrend === 'BEARISH' ? '#ef5350' : '#787b86'),
+      textcolor: '#ffffff',
+      badge: true
+    });
+
+    // 9. On-Chart Glassmorphic HUD Table
+    if (showHudTable) {
+      const hudRows: IndicatorTableCell[][] = [
+        [
+          { text: 'MTF', color: '#60a5fa', bold: true },
+          { text: 'Top-Down Demand Confirmation', color: '#ffffff', bold: true },
+          { text: `Step ${currentStep}/7`, color: '#38bdf8', bold: true }
+        ],
+        [
+          { text: '1D', color: '#ffffff', bgColor: dailyTrend === 'BULLISH' ? '#16a34a' : '#dc2626' },
+          { text: 'Daily Trend Bias', color: '#cbd5e1' },
+          { text: `${dailyTrend === 'BULLISH' ? '🟢 BULLISH' : '🔴 BEARISH'}`, color: dailyTrend === 'BULLISH' ? '#4ade80' : '#f87171', bold: true }
+        ],
+        [
+          { text: '4H', color: '#ffffff', bgColor: active4hZone?.type === 'DEMAND' ? '#0d9488' : '#b91c1c' },
+          { text: '4H Major Zone', color: '#cbd5e1' },
+          { text: active4hZone ? `${active4hZone.bottom.toFixed(2)} - ${active4hZone.top.toFixed(2)}` : 'Scanning...', color: '#ffffff' }
+        ],
+        [
+          { text: activeTfName, color: '#ffffff', bgColor: '#0284c7' },
+          { text: 'Sniper Refined Zone', color: '#cbd5e1' },
+          { text: `${targetBottom.toFixed(2)} - ${targetTop.toFixed(2)}`, color: '#38bdf8', bold: true }
+        ],
+        [
+          { text: '15M', color: '#ffffff', bgColor: fifteenMChochData ? '#16a34a' : '#475569' },
+          { text: '15M Structure Change', color: '#cbd5e1' },
+          { text: fifteenMChochData ? '✓ CHoCH Confirmed' : (priceHasEntered ? '⏳ Watching CHoCH' : 'Waiting Retest'), color: fifteenMChochData ? '#4ade80' : '#94a3b8' }
+        ],
+        [
+          { text: '5M', color: '#ffffff', bgColor: fiveMBosData ? '#16a34a' : '#475569' },
+          { text: '5M Sweep & BOS', color: '#cbd5e1' },
+          { text: fiveMBosData ? '✓ 5M Demand Created' : 'Waiting Confirmation', color: fiveMBosData ? '#4ade80' : '#94a3b8' }
+        ],
+        [
+          { text: 'STAT', color: '#ffffff', bgColor: setupData ? '#16a34a' : '#d97706' },
+          { text: setupData ? `${setupData.type} SETUP ACTIVE` : stateTitle, color: '#f8fafc', bold: true },
+          { text: setupData ? `1 : ${setupData.rr} R:R` : `Step ${currentStep}/7`, color: setupData ? '#22c55e' : '#f59e0b', bold: true }
+        ]
+      ];
+
+      output.tables?.push({
+        id: 'mtf-demand-hud-table',
+        position: 'top_right',
+        size: 'normal',
+        rows: hudRows
+      });
     }
 
     return output;
