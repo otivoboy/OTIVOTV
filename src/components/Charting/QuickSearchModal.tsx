@@ -227,12 +227,46 @@ export const QuickSearchModal: React.FC = () => {
     }] : [])
   );
 
-  const filteredItems = query.trim()
-    ? allItems.filter(item => 
-        item.title.toLowerCase().includes(query.toLowerCase()) || 
-        (item.description && item.description.toLowerCase().includes(query.toLowerCase())) ||
-        item.category.toLowerCase().includes(query.toLowerCase())
-      ).slice(0, 30)
+  const normQuery = query.trim().toLowerCase().replace(/vilatility/g, 'volatility');
+
+  const filteredItems = normQuery
+    ? allItems.filter(item => {
+        const titleLower = item.title.toLowerCase();
+        const descLower = (item.description || '').toLowerCase();
+        const catLower = item.category.toLowerCase();
+        
+        const directMatch = titleLower.includes(normQuery) || descLower.includes(normQuery) || catLower.includes(normQuery);
+        if (directMatch) return true;
+
+        if (item.category === 'symbol') {
+          // Check shorthand volatility matches
+          if ((normQuery.includes('vol') || normQuery.startsWith('v')) && (
+            (normQuery.includes('10') && (titleLower.includes('10') || descLower.includes('10'))) ||
+            (normQuery.includes('25') && (titleLower.includes('25') || descLower.includes('25'))) ||
+            (normQuery.includes('50') && (titleLower.includes('50') || descLower.includes('50'))) ||
+            (normQuery.includes('75') && (titleLower.includes('75') || descLower.includes('75'))) ||
+            (normQuery.includes('100') && (titleLower.includes('100') || descLower.includes('100')))
+          )) return true;
+
+          // Step Index match
+          if ((normQuery.includes('step') || normQuery.includes('stprng')) && (titleLower.includes('step') || descLower.includes('step'))) return true;
+
+          // Jump Indices match
+          if ((normQuery.includes('jump') || normQuery.startsWith('j')) && (
+            (normQuery.includes('10') && titleLower.includes('10')) ||
+            (normQuery.includes('25') && titleLower.includes('25')) ||
+            (normQuery.includes('50') && titleLower.includes('50')) ||
+            (normQuery.includes('75') && titleLower.includes('75')) ||
+            (normQuery.includes('100') && titleLower.includes('100')) ||
+            titleLower.includes('jump')
+          )) return true;
+
+          // Bull / Bear match
+          if ((normQuery.includes('bull') && titleLower.includes('bull')) || (normQuery.includes('bear') && titleLower.includes('bear'))) return true;
+        }
+
+        return false;
+      }).slice(0, 30)
     : allItems.slice(0, 20);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

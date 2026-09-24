@@ -1231,9 +1231,9 @@ plot(VB_DOWN, 'Volatility Lower', color=#b2ebf2, linewidth=1)`
   },
   {
     id: 'top_down_demand_confirmation',
-    name: 'Top-Down MTF Demand + Structure Confirmation',
+    name: 'OTIVO MTF Demand & Trend Indicator',
     category: 'Smart Money',
-    description: 'Top-down multi-timeframe Demand + Market Structure confirmation indicator. Analyzes Daily trend bias (HH/HL), marks 4H major demand/supply displacement zones, refines inside 1H and 30M, waits for price return, validates 15M CHoCH and 5M liquidity sweep + BOS, and triggers refined 5M demand entries with candle SL and trend-high TP.',
+    description: 'OTIVO Top-down multi-timeframe Demand + Market Structure confirmation indicator. Analyzes Daily trend bias (HH/HL), marks 4H major demand/supply displacement zones, refines inside 1H and 30M, waits for price return, validates 15M CHoCH and 5M liquidity sweep + BOS, and triggers refined 5M demand entries with candle SL and trend-high TP.',
     overlay: true,
     defaultParams: {
       daily_mode: 'hh_hl',
@@ -1253,12 +1253,12 @@ plot(VB_DOWN, 'Volatility Lower', color=#b2ebf2, linewidth=1)`
       sl_mode: 'origin_candle',
       sl_buffer_atr: 0.15,
       tp_mode: 'trend_high',
-      fixed_rr: 3.5,
-      show_hud_table: true,
-      color_4h_demand: '#26a69a',
-      color_1h_refined: '#10b981',
-      color_30m_refined: '#00b4d8',
-      color_5m_entry: '#22c55e',
+      fixed_rr: 4.9,
+      show_hud_table: false,
+      color_4h_demand: '#0d9488',
+      color_1h_refined: '#2563eb',
+      color_30m_refined: '#c026d3',
+      color_5m_entry: '#10b981',
       color_supply: '#ef5350'
     },
     paramDefinitions: [

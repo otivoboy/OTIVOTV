@@ -218,26 +218,43 @@ const EthereumIcon = () => (
 );
 
 // Synthetic / Volatility Index Icon
-const SyntheticPulseIcon = ({ color = '#8b5cf6', text = 'V' }: { color?: string; text?: string }) => (
-  <svg viewBox="0 0 32 32" className="w-full h-full">
-    <defs>
-      <linearGradient id={`synth-grad-${color}`} x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stopColor="#3b82f6" />
-        <stop offset="100%" stopColor={color} />
-      </linearGradient>
-    </defs>
-    <circle cx="16" cy="16" r="16" fill={`url(#synth-grad-${color})`} />
-    {/* Pulse waveform */}
-    <path
-      d="M6,17 L10,17 L13,9 L18,23 L22,14 L24,17 L26,17"
-      fill="none"
-      stroke="#ffffff"
-      strokeWidth="2.2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-  </svg>
-);
+const SyntheticPulseIcon = ({ color = '#8b5cf6', text = 'V' }: { color?: string; text?: string }) => {
+  const safeId = color.replace(/[^a-zA-Z0-9]/g, '');
+  return (
+    <svg viewBox="0 0 32 32" className="w-full h-full">
+      <defs>
+        <linearGradient id={`synth-grad-${safeId}`} x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#3b82f6" />
+          <stop offset="100%" stopColor={color} />
+        </linearGradient>
+      </defs>
+      <circle cx="16" cy="16" r="16" fill={`url(#synth-grad-${safeId})`} />
+      {/* Pulse waveform */}
+      <path
+        d="M4,15 L8,15 L11,7 L16,21 L20,11 L23,15 L28,15"
+        fill="none"
+        stroke="#ffffff"
+        strokeWidth="2.0"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {text && (
+        <text 
+          x="16" 
+          y="27" 
+          textAnchor="middle" 
+          fill="#ffffff" 
+          fontSize="7.5" 
+          fontWeight="bold" 
+          fontFamily="sans-serif"
+          className="drop-shadow-xs"
+        >
+          {text}
+        </text>
+      )}
+    </svg>
+  );
+};
 
 // Boom Index Icon (Vibrant Emerald Spike Icon)
 const BoomIcon = () => (
@@ -272,6 +289,96 @@ const CrashIcon = () => (
     {/* Downward crash drop bolt */}
     <path
       d="M15 27L24 15H17.5L19.5 5L8.5 19H16L13.5 27Z"
+      fill="#ffffff"
+    />
+  </svg>
+);
+
+// Step Index Icon (Cyan Stepped Staircase)
+const StepIcon = () => (
+  <svg viewBox="0 0 32 32" className="w-full h-full">
+    <defs>
+      <linearGradient id="step-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#0891b2" />
+        <stop offset="100%" stopColor="#0284c7" />
+      </linearGradient>
+    </defs>
+    <circle cx="16" cy="16" r="16" fill="url(#step-gradient)" />
+    {/* Stepped stair blocks */}
+    <path
+      d="M7 23H13V17H19V11H25V8"
+      stroke="#ffffff"
+      strokeWidth="3.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      fill="none"
+    />
+    <circle cx="25" cy="8" r="2" fill="#ffffff" />
+  </svg>
+);
+
+// Jump Index Icon (Amber Quantum Jump Leap)
+const JumpIcon: React.FC<{ text?: string }> = ({ text }) => (
+  <svg viewBox="0 0 32 32" className="w-full h-full">
+    <defs>
+      <linearGradient id="jump-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#d97706" />
+        <stop offset="100%" stopColor="#f59e0b" />
+      </linearGradient>
+    </defs>
+    <circle cx="16" cy="16" r="16" fill="url(#jump-gradient)" />
+    {/* Dynamic parabolic jump arc & arrow */}
+    <path
+      d="M7 23C9 14 18 10 24 13"
+      stroke="#ffffff"
+      strokeWidth="2.8"
+      strokeLinecap="round"
+      fill="none"
+    />
+    <polygon points="21,9 26,13 22,17" fill="#ffffff" />
+    {text && (
+      <text x="16" y="27" textAnchor="middle" fill="#ffffff" fontSize="7.5" fontWeight="bold" fontFamily="sans-serif">
+        {text}
+      </text>
+    )}
+  </svg>
+);
+
+// Bull Market Index Icon (Emerald Horns)
+const BullIcon = () => (
+  <svg viewBox="0 0 32 32" className="w-full h-full">
+    <defs>
+      <linearGradient id="bull-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#047857" />
+        <stop offset="100%" stopColor="#10b981" />
+      </linearGradient>
+    </defs>
+    <circle cx="16" cy="16" r="16" fill="url(#bull-gradient)" />
+    {/* Bull Horns / Ascending Shape */}
+    <path
+      d="M8 12C9.5 8 13 8 14 13C14.8 17 17.2 17 18 13C19 8 22.5 8 24 12C21 16 18 25 16 25C14 25 11 16 8 12Z"
+      fill="#ffffff"
+    />
+  </svg>
+);
+
+// Bear Market Index Icon (Rose Claw)
+const BearIcon = () => (
+  <svg viewBox="0 0 32 32" className="w-full h-full">
+    <defs>
+      <linearGradient id="bear-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#be123c" />
+        <stop offset="100%" stopColor="#f43f5e" />
+      </linearGradient>
+    </defs>
+    <circle cx="16" cy="16" r="16" fill="url(#bear-gradient)" />
+    {/* Bear Paw / Claw Marks */}
+    <circle cx="10" cy="11" r="2" fill="#ffffff" />
+    <circle cx="14" cy="9" r="2" fill="#ffffff" />
+    <circle cx="18" cy="9" r="2" fill="#ffffff" />
+    <circle cx="22" cy="11" r="2" fill="#ffffff" />
+    <path
+      d="M10 18C10 15 22 15 22 18C22 23 18 25 16 25C14 25 10 23 10 18Z"
       fill="#ffffff"
     />
   </svg>
@@ -345,14 +452,74 @@ export const SymbolLogo: React.FC<SymbolLogoProps> = ({ symbol, size = 'md', cla
     clean.includes('75V') ||
     clean.includes('50V') ||
     clean.includes('25V') ||
-    clean.includes('10V')
+    clean.includes('10V') ||
+    clean.includes('150V') ||
+    clean.includes('200V') ||
+    clean.includes('250V') ||
+    clean.includes('300V')
   ) {
-    const isHighVol = clean.includes('100') || clean.includes('75');
+    const isHighVol = clean.includes('100') || clean.includes('75') || clean.includes('150') || clean.includes('200') || clean.includes('250') || clean.includes('300');
     const color = isHighVol ? '#f43f5e' : '#8b5cf6';
+    let volNum = 'V';
+    if (clean.includes('300')) volNum = '300';
+    else if (clean.includes('250')) volNum = '250';
+    else if (clean.includes('200')) volNum = '200';
+    else if (clean.includes('150')) volNum = '150';
+    else if (clean.includes('100')) volNum = '100';
+    else if (clean.includes('75')) volNum = '75';
+    else if (clean.includes('50')) volNum = '50';
+    else if (clean.includes('25')) volNum = '25';
+    else if (clean.includes('10')) volNum = '10';
+
     return (
       <div className={`relative inline-flex items-center justify-center shrink-0 ${sz.outer} ${className}`}>
         <div className="w-full h-full rounded-full overflow-hidden shadow-sm ring-1 ring-black/20">
-          <SyntheticPulseIcon color={color} text={clean.slice(0, 3)} />
+          <SyntheticPulseIcon color={color} text={volNum} />
+        </div>
+      </div>
+    );
+  }
+
+  // 4. Step Index (stpRNG, STEP)
+  if (clean.includes('STPRNG') || clean.includes('STEP')) {
+    return (
+      <div className={`relative inline-flex items-center justify-center shrink-0 ${sz.outer} ${className}`}>
+        <div className="w-full h-full rounded-full overflow-hidden shadow-sm ring-1 ring-cyan-500/30">
+          <StepIcon />
+        </div>
+      </div>
+    );
+  }
+
+  // 5. Jump Indices (JD10, JD25, JD50, JD75, JD100, JUMP)
+  if (clean.startsWith('JD') || clean.includes('JUMP')) {
+    const jNum = clean.replace(/[^0-9]/g, '');
+    return (
+      <div className={`relative inline-flex items-center justify-center shrink-0 ${sz.outer} ${className}`}>
+        <div className="w-full h-full rounded-full overflow-hidden shadow-sm ring-1 ring-amber-500/30">
+          <JumpIcon text={jNum ? `J${jNum}` : 'JUMP'} />
+        </div>
+      </div>
+    );
+  }
+
+  // 6. Bull Market Index (RDBULL, BULL)
+  if (clean.includes('BULL') || clean.includes('RDBULL')) {
+    return (
+      <div className={`relative inline-flex items-center justify-center shrink-0 ${sz.outer} ${className}`}>
+        <div className="w-full h-full rounded-full overflow-hidden shadow-sm ring-1 ring-emerald-500/30">
+          <BullIcon />
+        </div>
+      </div>
+    );
+  }
+
+  // 7. Bear Market Index (RDBEAR, BEAR)
+  if (clean.includes('BEAR') || clean.includes('RDBEAR')) {
+    return (
+      <div className={`relative inline-flex items-center justify-center shrink-0 ${sz.outer} ${className}`}>
+        <div className="w-full h-full rounded-full overflow-hidden shadow-sm ring-1 ring-rose-500/30">
+          <BearIcon />
         </div>
       </div>
     );

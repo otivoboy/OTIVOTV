@@ -28,14 +28,37 @@ export interface MarketSymbol {
 }
 
 const DEFAULT_SYMBOLS: MarketSymbol[] = [
-  // Derived / Synthetic Volatility Indices
-  { id: '1HZ100V', symbol: '1HZ100V', display: 'Volatility 100 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.01 },
-  { id: 'R_100', symbol: 'R_100', display: 'Volatility 100 Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.01 },
-  { id: '1HZ50V', symbol: '1HZ50V', display: 'Volatility 50 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.0001 },
-  { id: 'R_50', symbol: 'R_50', display: 'Volatility 50 Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.0001 },
-  { id: '1HZ75V', symbol: '1HZ75V', display: 'Volatility 75 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.01 },
-  { id: '1HZ25V', symbol: '1HZ25V', display: 'Volatility 25 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.001 },
-  { id: '1HZ10V', symbol: '1HZ10V', display: 'Volatility 10 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', pip: 0.001 },
+  // Derived / Synthetic Volatility Indices (10, 25, 50, 75, 100 & 1s variants)
+  { id: '1HZ10V', symbol: '1HZ10V', display: 'Volatility 10 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'random_index', submarketDisplay: 'Continuous Indices', pip: 0.001 },
+  { id: 'R_10', symbol: 'R_10', display: 'Volatility 10 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'random_index', submarketDisplay: 'Continuous Indices', pip: 0.001 },
+  { id: '1HZ25V', symbol: '1HZ25V', display: 'Volatility 25 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'random_index', submarketDisplay: 'Continuous Indices', pip: 0.001 },
+  { id: 'R_25', symbol: 'R_25', display: 'Volatility 25 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'random_index', submarketDisplay: 'Continuous Indices', pip: 0.001 },
+  { id: '1HZ50V', symbol: '1HZ50V', display: 'Volatility 50 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'random_index', submarketDisplay: 'Continuous Indices', pip: 0.0001 },
+  { id: 'R_50', symbol: 'R_50', display: 'Volatility 50 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'random_index', submarketDisplay: 'Continuous Indices', pip: 0.0001 },
+  { id: '1HZ75V', symbol: '1HZ75V', display: 'Volatility 75 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'random_index', submarketDisplay: 'Continuous Indices', pip: 0.01 },
+  { id: 'R_75', symbol: 'R_75', display: 'Volatility 75 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'random_index', submarketDisplay: 'Continuous Indices', pip: 0.01 },
+  { id: '1HZ100V', symbol: '1HZ100V', display: 'Volatility 100 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'random_index', submarketDisplay: 'Continuous Indices', pip: 0.01 },
+  { id: 'R_100', symbol: 'R_100', display: 'Volatility 100 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'random_index', submarketDisplay: 'Continuous Indices', pip: 0.01 },
+  { id: '1HZ150V', symbol: '1HZ150V', display: 'Volatility 150 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'random_index', submarketDisplay: 'Continuous Indices', pip: 0.01 },
+  { id: '1HZ200V', symbol: '1HZ200V', display: 'Volatility 200 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'random_index', submarketDisplay: 'Continuous Indices', pip: 0.01 },
+  { id: '1HZ250V', symbol: '1HZ250V', display: 'Volatility 250 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'random_index', submarketDisplay: 'Continuous Indices', pip: 0.01 },
+  { id: '1HZ300V', symbol: '1HZ300V', display: 'Volatility 300 (1s) Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'random_index', submarketDisplay: 'Continuous Indices', pip: 0.01 },
+
+  // Step Indices
+  { id: 'stpRNG', symbol: 'stpRNG', display: 'Step Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'step_index', submarketDisplay: 'Step Index', pip: 0.1 },
+  { id: 'stpRNG2', symbol: 'stpRNG2', display: 'Step 200 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'step_index', submarketDisplay: 'Step Index', pip: 0.1 },
+  { id: 'stpRNG5', symbol: 'stpRNG5', display: 'Step 500 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'step_index', submarketDisplay: 'Step Index', pip: 0.1 },
+
+  // Jump Indices (JD10, JD25, JD50, JD75, JD100)
+  { id: 'JD10', symbol: 'JD10', display: 'Jump 10 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'jump_index', submarketDisplay: 'Jump Indices', pip: 0.01 },
+  { id: 'JD25', symbol: 'JD25', display: 'Jump 25 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'jump_index', submarketDisplay: 'Jump Indices', pip: 0.01 },
+  { id: 'JD50', symbol: 'JD50', display: 'Jump 50 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'jump_index', submarketDisplay: 'Jump Indices', pip: 0.01 },
+  { id: 'JD75', symbol: 'JD75', display: 'Jump 75 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'jump_index', submarketDisplay: 'Jump Indices', pip: 0.01 },
+  { id: 'JD100', symbol: 'JD100', display: 'Jump 100 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'jump_index', submarketDisplay: 'Jump Indices', pip: 0.01 },
+
+  // Bull & Bear Market Reset Indices
+  { id: 'RDBULL', symbol: 'RDBULL', display: 'Bull Market Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'bull_bear', submarketDisplay: 'Daily Reset Indices', pip: 0.0001 },
+  { id: 'RDBEAR', symbol: 'RDBEAR', display: 'Bear Market Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'bull_bear', submarketDisplay: 'Daily Reset Indices', pip: 0.0001 },
 
   // Boom Indices
   { id: 'BOOM50', symbol: 'BOOM50', display: 'Boom 50 Index', market: 'synthetic_index', marketDisplay: 'Derived', submarket: 'crash_boom', submarketDisplay: 'Crash/Boom', pip: 0.01 },
@@ -100,7 +123,11 @@ const DEFAULT_SYMBOLS: MarketSymbol[] = [
 
 let activeSymbolsList: MarketSymbol[] = [...DEFAULT_SYMBOLS];
 const subscribedSymbols = new Set<string>();
-const requestedSymbols = new Set<string>(['1HZ100V', 'R_100', '1HZ10V', 'R_50', '1HZ25V', '1HZ75V', 'frxEURUSD', 'cryBTCUSD', 'frxXAUUSD']);
+const requestedSymbols = new Set<string>([
+  '1HZ100V', 'R_100', '1HZ75V', 'R_75', '1HZ50V', 'R_50', '1HZ25V', 'R_25', '1HZ10V', 'R_10',
+  'stpRNG', 'JD10', 'JD25', 'JD50', 'JD75', 'JD100', 'RDBULL', 'RDBEAR',
+  'frxEURUSD', 'cryBTCUSD', 'frxXAUUSD'
+]);
 let validDerivSymbols = new Set<string>(DEFAULT_SYMBOLS.map(s => s.symbol));
 const lastTickTime: Record<string, number> = {};
 const lastPrices: Record<string, number> = {};
@@ -730,8 +757,27 @@ async function startServer() {
           });
 
           if (mappedSymbols.length > 0) {
-            activeSymbolsList = mappedSymbols;
-            validDerivSymbols = new Set(mappedSymbols.map(s => s.symbol));
+            const initialMap = new Map(DEFAULT_SYMBOLS.map(p => [p.id.toLowerCase(), p]));
+            const mergedList: MarketSymbol[] = [];
+            
+            // Prioritize curated DEFAULT_SYMBOLS
+            DEFAULT_SYMBOLS.forEach(p => {
+              const match = mappedSymbols.find(s => s.id.toLowerCase() === p.id.toLowerCase() || s.symbol.toLowerCase() === p.symbol.toLowerCase());
+              mergedList.push({
+                ...p,
+                isOpen: match ? match.isOpen : true
+              });
+            });
+
+            // Add other symbols returned by Deriv
+            mappedSymbols.forEach(s => {
+              if (!initialMap.has(s.id.toLowerCase()) && !initialMap.has(s.symbol.toLowerCase())) {
+                mergedList.push(s);
+              }
+            });
+
+            activeSymbolsList = mergedList;
+            validDerivSymbols = new Set(mergedList.map(s => s.symbol));
             io.emit("symbols", activeSymbolsList);
           }
           return;

@@ -234,6 +234,11 @@ export interface TopDownIndicatorState {
     bottom: number;
     time: number;
   } | null;
+  priceReturnsToZone: {
+    time: number;
+    price: number;
+    confirmed: boolean;
+  } | null;
   setup: {
     active: boolean;
     type: 'BUY' | 'SELL';
@@ -247,6 +252,23 @@ export interface TopDownIndicatorState {
   } | null;
 }
 
+export interface IndicatorCallout {
+  id: string;
+  x: number; // timestamp in seconds (anchor point on chart)
+  y: number; // price coordinate (anchor point on chart)
+  title: string;
+  subtitle?: string;
+  offsetX?: number; // pixel offset X from anchor
+  offsetY?: number; // pixel offset Y from anchor
+  borderColor: string;
+  bgColor?: string;
+  titleColor?: string;
+  subtitleColor?: string;
+  pointerType?: 'none' | 'arrow' | 'line' | 'dot';
+  arrowDirection?: 'up' | 'down' | 'left' | 'right';
+  showAnchorDot?: boolean;
+}
+
 export interface IndicatorOutput {
   id: string;
   name: string;
@@ -257,6 +279,7 @@ export interface IndicatorOutput {
   labels: IndicatorLabel[];
   boxes: IndicatorBox[];
   bands: IndicatorBand[];
+  callouts?: IndicatorCallout[];
   tables?: IndicatorTable[];
   footprints?: FootprintCandle[];
   deltaData?: DeltaPoint[];
@@ -1996,17 +2019,30 @@ export function runPineEngine(
       fifteenMChoch: fifteenMChochData,
       fiveMBos: fiveMBosData,
       fiveMZone: fiveMZoneData,
+      priceReturnsToZone: priceHasEntered ? {
+        time: entryTimeOfZone || latestTime,
+        price: targetBottom,
+        confirmed: true
+      } : null,
       setup: setupData
     };
 
+    // Initialize callouts array
+    output.callouts = [];
+
     // =========================================================================
-    // VISUALS: BOXES, LINES, LABELS, TABLES & SIGNALS
+    // VISUALS: BOXES, LINES, CALLOUTS, LABELS & SIGNALS (MATCHING SCREENSHOT)
     // =========================================================================
+    const formatLvl = (n: number | null | undefined) => {
+      if (n === null || n === undefined || isNaN(n)) return '0.000';
+      return n.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+    };
+
     // 1. 4H Major Zone Box
     if (active4hZone && params.show_4h_zones !== false) {
       const isDem = active4hZone.type === 'DEMAND';
-      const bColor = isDem ? toRgba(color4hDemand, 0.15, 'rgba(38,166,154,0.15)') : toRgba(colorSupply, 0.15, 'rgba(239,83,80,0.15)');
-      const borderColor = isDem ? color4hDemand : colorSupply;
+      const bColor = isDem ? 'rgba(13, 148, 136, 0.28)' : 'rgba(239, 83, 80, 0.25)';
+      const borderColor = isDem ? '#0d9488' : '#ef5350';
 
       output.boxes.push({
         id: 'box-4h-major',
@@ -2016,11 +2052,27 @@ export function runPineEngine(
         y2: active4hZone.bottom,
         color: bColor,
         bordercolor: borderColor,
-        label: `4H ${active4hZone.type} [${active4hZone.bottom.toFixed(2)} - ${active4hZone.top.toFixed(2)}]`
+        label: ''
+      });
+
+      // 4H Demand Zone Callout Pill
+      const midZoneX = active4hZone.startTime + Math.max(1, Math.floor((latestTime - active4hZone.startTime) * 0.45));
+      output.callouts.push({
+        id: 'callout-4h-zone',
+        x: midZoneX,
+        y: active4hZone.bottom,
+        title: '4H Demand Zone',
+        subtitle: `${formatLvl(active4hZone.top)} – ${formatLvl(active4hZone.bottom)}`,
+        borderColor: '#0d9488',
+        titleColor: '#ffffff',
+        subtitleColor: '#2dd4bf',
+        offsetY: 34,
+        pointerType: 'line',
+        showAnchorDot: true
       });
     }
 
-    // 2. 1H Refined Zone Box
+    // 2. 1H Refined Zone Box & Callout
     if (refined1hZone && active4hZone) {
       output.boxes.push({
         id: 'box-1h-refined',
@@ -2028,14 +2080,31 @@ export function runPineEngine(
         y1: refined1hZone.top,
         x2: latestTime,
         y2: refined1hZone.bottom,
-        color: toRgba(color1hRefined, 0.22, 'rgba(16,185,129,0.22)'),
-        bordercolor: color1hRefined,
-        borderstyle: 'dashed',
-        label: `1H REFINED [${refined1hZone.bottom.toFixed(2)} - ${refined1hZone.top.toFixed(2)}]`
+        color: 'rgba(37, 99, 235, 0.38)',
+        bordercolor: '#2563eb',
+        borderstyle: 'solid',
+        label: ''
+      });
+
+      // 1H Refined Demand Callout Pill
+      const h1AnchorX = active4hZone.startTime + Math.max(1, Math.floor((latestTime - active4hZone.startTime) * 0.2));
+      output.callouts.push({
+        id: 'callout-1h-zone',
+        x: h1AnchorX,
+        y: refined1hZone.top,
+        title: '1H Refined Demand',
+        subtitle: `${formatLvl(refined1hZone.bottom)} – ${formatLvl(refined1hZone.top)}`,
+        borderColor: '#2563eb',
+        titleColor: '#ffffff',
+        subtitleColor: '#60a5fa',
+        offsetX: -35,
+        offsetY: -35,
+        pointerType: 'line',
+        showAnchorDot: true
       });
     }
 
-    // 3. 30M Refined Zone Box
+    // 3. 30M Refined Zone Box & Callout
     if (refined30mZone && active4hZone) {
       output.boxes.push({
         id: 'box-30m-refined',
@@ -2043,14 +2112,81 @@ export function runPineEngine(
         y1: refined30mZone.top,
         x2: latestTime,
         y2: refined30mZone.bottom,
-        color: toRgba(color30mRefined, 0.32, 'rgba(0,180,216,0.32)'),
-        bordercolor: color30mRefined,
+        color: 'rgba(192, 38, 211, 0.38)',
+        bordercolor: '#c026d3',
         borderstyle: 'solid',
-        label: `30M REFINED [${refined30mZone.bottom.toFixed(2)} - ${refined30mZone.top.toFixed(2)}]`
+        label: ''
+      });
+
+      // 30M Refined Demand Callout Pill
+      const m30AnchorX = active4hZone.startTime + Math.max(1, Math.floor((latestTime - active4hZone.startTime) * 0.32));
+      output.callouts.push({
+        id: 'callout-30m-zone',
+        x: m30AnchorX,
+        y: refined30mZone.top,
+        title: '30M Refined Demand',
+        subtitle: `${formatLvl(refined30mZone.bottom)} – ${formatLvl(refined30mZone.top)}`,
+        borderColor: '#c026d3',
+        titleColor: '#ffffff',
+        subtitleColor: '#e879f9',
+        offsetX: -15,
+        offsetY: -45,
+        pointerType: 'line',
+        showAnchorDot: true
       });
     }
 
-    // 4. 5M Refined Entry Zone Box
+    // 4. Price Returns to Zone Callout
+    if (priceHasEntered && active4hZone) {
+      output.callouts.push({
+        id: 'callout-retest',
+        x: entryTimeOfZone || (latestTime - 3600 * 2),
+        y: targetBottom,
+        title: 'Price returns to zone',
+        subtitle: '(4H / 1H / 30M)',
+        borderColor: '#0d9488',
+        titleColor: '#ffffff',
+        subtitleColor: '#2dd4bf',
+        offsetY: 38,
+        pointerType: 'arrow',
+        arrowDirection: 'up',
+        showAnchorDot: true
+      });
+    }
+
+    // 5. 15M CHOCH Badge Callout
+    if (fifteenMChochData && fifteenMChochData.confirmed) {
+      output.callouts.push({
+        id: 'callout-15m-choch',
+        x: fifteenMChochData.time,
+        y: fifteenMChochData.price,
+        title: '15M CHOCH ⬆',
+        borderColor: '#0d9488',
+        titleColor: '#2dd4bf',
+        offsetY: -32,
+        pointerType: 'arrow',
+        arrowDirection: 'down',
+        showAnchorDot: true
+      });
+    }
+
+    // 6. 5M BOS Badge Callout
+    if (fiveMBosData && fiveMBosData.confirmed) {
+      output.callouts.push({
+        id: 'callout-5m-bos',
+        x: fiveMBosData.time,
+        y: fiveMBosData.price,
+        title: '5M BOS ⬆',
+        borderColor: '#0d9488',
+        titleColor: '#2dd4bf',
+        offsetY: -34,
+        pointerType: 'arrow',
+        arrowDirection: 'down',
+        showAnchorDot: true
+      });
+    }
+
+    // 7. 5M Demand Zone Box & Callout
     if (fiveMZoneData) {
       output.boxes.push({
         id: 'box-5m-entry-zone',
@@ -2058,117 +2194,114 @@ export function runPineEngine(
         y1: fiveMZoneData.top,
         x2: latestTime,
         y2: fiveMZoneData.bottom,
-        color: toRgba(color5mEntry, 0.45, 'rgba(34,197,94,0.45)'),
-        bordercolor: color5mEntry,
+        color: 'rgba(16, 185, 129, 0.32)',
+        bordercolor: '#10b981',
         borderstyle: 'solid',
-        label: `5M ENTRY ZONE [${fiveMZoneData.bottom.toFixed(2)} - ${fiveMZoneData.top.toFixed(2)}]`
+        label: ''
+      });
+
+      output.callouts.push({
+        id: 'callout-5m-zone',
+        x: fiveMZoneData.time + 150,
+        y: fiveMZoneData.bottom,
+        title: '5M Demand Zone',
+        subtitle: `${formatLvl(fiveMZoneData.bottom)} – ${formatLvl(fiveMZoneData.top)}`,
+        borderColor: '#10b981',
+        titleColor: '#ffffff',
+        subtitleColor: '#34d399',
+        offsetY: 28,
+        pointerType: 'line',
+        showAnchorDot: true
       });
     }
 
-    // 5. 15M CHoCH Line
-    if (fifteenMChochData && fifteenMChochData.confirmed) {
+    // 8. Trade Setup Callouts: Entry (5M), SL (Below Candle Low), and TP (Previous High)
+    if (setupData) {
+      const entryTime = fiveMBosData ? (fiveMBosData.time + 300) : latestTime;
+
+      // Entry (5M) Callout
+      output.callouts.push({
+        id: 'callout-entry',
+        x: entryTime,
+        y: setupData.entryPrice,
+        title: 'Entry (5M)',
+        subtitle: formatLvl(setupData.entryPrice),
+        borderColor: '#0d9488',
+        titleColor: '#ffffff',
+        subtitleColor: '#2dd4bf',
+        offsetX: 30,
+        offsetY: -36,
+        pointerType: 'arrow',
+        arrowDirection: 'down',
+        showAnchorDot: true
+      });
+
+      // SL (Below Candle Low) Callout
+      output.callouts.push({
+        id: 'callout-sl',
+        x: entryTime,
+        y: setupData.slPrice,
+        title: 'SL (Below Candle Low)',
+        subtitle: formatLvl(setupData.slPrice),
+        borderColor: '#ef4444',
+        titleColor: '#ef4444',
+        subtitleColor: '#ef4444',
+        offsetX: 25,
+        offsetY: 34,
+        pointerType: 'arrow',
+        arrowDirection: 'up',
+        showAnchorDot: true
+      });
+
+      // TP (Previous High) Callout
+      // Find highest high point time
+      let highestTime = latestTime;
+      let maxH = -Infinity;
+      for (let i = Math.max(0, candles.length - 80); i < candles.length; i++) {
+        if (highPrices[i] > maxH) {
+          maxH = highPrices[i];
+          highestTime = times[i];
+        }
+      }
+
+      output.callouts.push({
+        id: 'callout-tp',
+        x: highestTime,
+        y: setupData.tpPrice,
+        title: 'TP (Previous High)',
+        subtitle: formatLvl(setupData.tpPrice),
+        borderColor: '#0d9488',
+        titleColor: '#2dd4bf',
+        subtitleColor: '#2dd4bf',
+        offsetY: -32,
+        pointerType: 'arrow',
+        arrowDirection: 'down',
+        showAnchorDot: true
+      });
+
+      // Horizontal dashed projection line extending from TP high wick across to price axis
       output.lines.push({
-        id: 'line-15m-choch',
-        x1: fifteenMChochData.time,
-        y1: fifteenMChochData.price,
-        x2: latestTime,
-        y2: fifteenMChochData.price,
-        color: '#00b4d8',
+        id: 'setup-tp-projection-line',
+        x1: highestTime,
+        y1: setupData.tpPrice,
+        x2: latestTime + 3600 * 8,
+        y2: setupData.tpPrice,
+        color: '#10b981',
         width: 1.5,
         style: 'dashed',
-        label: '15M CHoCH ↑'
-      });
-    }
-
-    // 6. 5M BOS Line
-    if (fiveMBosData && fiveMBosData.confirmed) {
-      output.lines.push({
-        id: 'line-5m-bos',
-        x1: fiveMBosData.time,
-        y1: fiveMBosData.price,
-        x2: latestTime,
-        y2: fiveMBosData.price,
-        color: '#22c55e',
-        width: 1.8,
-        style: 'solid',
-        label: '5M BOS ↑'
-      });
-    }
-
-    // 7. Setup Trade Execution Projection Lines (Entry, SL, TP)
-    if (setupData) {
-      const isLong = setupData.type === 'BUY';
-      const entryCol = isLong ? '#2962ff' : '#f59e0b';
-      const slCol = '#ef4444';
-      const tpCol = '#10b981';
-
-      output.lines.push({
-        id: 'setup-entry-line',
-        x1: fiveMBosData ? fiveMBosData.time : latestTime - 3600,
-        y1: setupData.entryPrice,
-        x2: latestTime,
-        y2: setupData.entryPrice,
-        color: entryCol,
-        width: 2,
-        style: 'solid',
-        label: `ENTRY: ${setupData.entryPrice.toFixed(2)}`
+        label: `TP ${formatLvl(setupData.tpPrice)}`
       });
 
-      output.lines.push({
-        id: 'setup-sl-line',
-        x1: fiveMBosData ? fiveMBosData.time : latestTime - 3600,
-        y1: setupData.slPrice,
-        x2: latestTime,
-        y2: setupData.slPrice,
-        color: slCol,
-        width: 2,
-        style: 'dashed',
-        label: `SL: ${setupData.slPrice.toFixed(2)}`
-      });
-
-      output.lines.push({
-        id: 'setup-tp-line',
-        x1: fiveMBosData ? fiveMBosData.time : latestTime - 3600,
-        y1: setupData.tpPrice,
-        x2: latestTime,
-        y2: setupData.tpPrice,
-        color: tpCol,
-        width: 2,
-        style: 'solid',
-        label: `TP: ${setupData.tpPrice.toFixed(2)} (R:R 1:${setupData.rr})`
-      });
-
-      // Signal Marker
+      // Signal marker
       output.signals.push({
-        time: fiveMBosData ? fiveMBosData.time : latestTime,
-        type: isLong ? 'BUY' : 'SELL',
+        time: entryTime,
+        type: setupData.type === 'BUY' ? 'BUY' : 'SELL',
         price: setupData.entryPrice,
-        comment: `${isLong ? 'BUY' : 'SELL'} Setup (R:R 1:${setupData.rr})`
-      });
-
-      output.labels.push({
-        id: 'setup-entry-label',
-        x: fiveMBosData ? fiveMBosData.time : latestTime,
-        y: setupData.entryPrice,
-        text: `ENTER ${setupData.type} (1:${setupData.rr} R:R)`,
-        color: isLong ? '#22c55e' : '#ef4444',
-        textcolor: '#ffffff',
-        badge: true
+        comment: `${setupData.type} Setup (1:${setupData.rr} R:R)`
       });
     }
 
-    // 8. Daily Trend Banner Label
-    output.labels.push({
-      id: 'daily-trend-tag',
-      x: latestTime,
-      y: (lastDHigh || currentPrice) * 1.002,
-      text: `DAILY TREND: ${dailyTrend} ↑`,
-      color: dailyTrend === 'BULLISH' ? '#10b981' : (dailyTrend === 'BEARISH' ? '#ef5350' : '#787b86'),
-      textcolor: '#ffffff',
-      badge: true
-    });
-
-    // 9. On-Chart Glassmorphic HUD Table
+    // 9. On-Chart Glassmorphic HUD Table (if explicitly toggled in settings)
     if (showHudTable) {
       const hudRows: IndicatorTableCell[][] = [
         [

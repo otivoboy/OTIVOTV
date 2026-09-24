@@ -14,7 +14,10 @@ import {
   Activity,
   Code,
   ChevronDown,
-  Clock
+  Clock,
+  Target,
+  ShieldAlert,
+  CheckCircle2
 } from 'lucide-react';
 import { BUILTIN_INDICATORS, IndicatorPreset, IndicatorParamDef } from '../../lib/indicatorsList';
 import { IndicatorItem, useMarketStore } from '../../store/useMarketStore';
@@ -51,6 +54,7 @@ export const IndicatorSettingsModal: React.FC<IndicatorSettingsModalProps> = ({ 
   const isDelta = idLower.includes('delta');
   const isLiquiditySweep = idLower.includes('liquidity_sweep') || idLower.includes('liquidity sweep');
   const isLiquiditySwings = idLower.includes('liquidity_swings') || idLower.includes('liquidity swings');
+  const isTopDown = idLower.includes('top_down') || idLower.includes('demand_confirmation') || idLower.includes('mtf demand') || idLower.includes('top-down');
 
   const paramDefs: IndicatorParamDef[] = preset?.paramDefinitions || [
     { key: 'length', name: 'Length', type: 'int', default: 14, min: 1, max: 200, category: 'Calculations' }
@@ -216,7 +220,7 @@ export const IndicatorSettingsModal: React.FC<IndicatorSettingsModalProps> = ({ 
                 Inputs & Parameters
               </button>
 
-              {(isFootprint || isDelta || isLiquiditySweep || isLiquiditySwings) && (
+              {(isFootprint || isDelta || isLiquiditySweep || isLiquiditySwings || isTopDown) && (
                 <button
                   onClick={() => setActiveTab('direction')}
                   className={`flex items-center gap-1.5 px-3 py-2 border-b-2 transition-colors ${
@@ -226,7 +230,7 @@ export const IndicatorSettingsModal: React.FC<IndicatorSettingsModalProps> = ({ 
                   }`}
                 >
                   <Compass size={14} />
-                  {(isLiquiditySweep || isLiquiditySwings) ? 'Architecture & Strategy Guide' : 'Direction Intelligence (X-Ray)'}
+                  {(isLiquiditySweep || isLiquiditySwings || isTopDown) ? 'Architecture & Strategy Guide' : 'Direction Intelligence (X-Ray)'}
                   <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500/20 text-amber-400">
                     PRO
                   </span>
@@ -345,6 +349,276 @@ export const IndicatorSettingsModal: React.FC<IndicatorSettingsModalProps> = ({ 
                       <span className="text-sm">{s.label}</span>
                     </label>
                   ))}
+                </div>
+              </div>
+            ) : isTopDown ? (
+              <div className="space-y-4 py-1 text-xs">
+                {/* Step 1: Daily Trend & Bias */}
+                <div className={`p-3.5 rounded-xl border ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                  <div className="flex items-center gap-2 text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2.5">
+                    <TrendingUp size={15} />
+                    <span>Step 1: Daily — Trend / Bias Confirmation</span>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    <div>
+                      <div className="font-semibold text-slate-200 mb-1">Daily Trend Confirmation Mode</div>
+                      <select
+                        value={params.daily_mode || 'hh_hl'}
+                        onChange={e => handleParamChange('daily_mode', e.target.value)}
+                        className={`w-full px-3 py-1.5 rounded text-xs font-medium border ${
+                          isDark ? 'bg-[#131722] border-[#2a2e39] text-[#d1d4dc]' : 'bg-white border-slate-300 text-slate-700'
+                        } focus:outline-none focus:border-blue-500`}
+                      >
+                        <option value="hh_hl">Market Structure (Higher Highs / Higher Lows)</option>
+                        <option value="ema">EMA 20/50 Trend Alignment</option>
+                        <option value="both">Combined Structure + EMA Alignment</option>
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 pt-1">
+                      <div>
+                        <span className="font-medium text-slate-300 block mb-1">Pivot Lookback (Bars)</span>
+                        <input
+                          type="number"
+                          min={2}
+                          max={20}
+                          value={params.daily_lookback ?? 5}
+                          onChange={e => handleParamChange('daily_lookback', parseInt(e.target.value) || 5)}
+                          className={`w-full px-2.5 py-1 text-xs rounded border ${
+                            isDark ? 'bg-[#131722] border-[#2a2e39] text-[#d1d4dc]' : 'bg-white border-slate-300 text-slate-700'
+                          }`}
+                        />
+                      </div>
+                      <div className="flex flex-col justify-end">
+                        <label className="flex items-center gap-2 cursor-pointer select-none py-1">
+                          <input
+                            type="checkbox"
+                            checked={params.daily_ema_filter ?? true}
+                            onChange={e => handleParamChange('daily_ema_filter', e.target.checked)}
+                            className="w-4 h-4 rounded border-slate-600 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="font-medium text-slate-300">50 EMA Filter</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="pt-1">
+                      <label className="flex items-center gap-2 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={params.only_trend_entries ?? true}
+                          onChange={e => handleParamChange('only_trend_entries', e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-600 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        <div>
+                          <span className="font-semibold text-slate-200">Strict Trend Alignment (No Counter-Trend)</span>
+                          <p className="text-[11px] text-slate-400 mt-0.5">Daily UP = Demand Only. Daily DOWN = Supply Only.</p>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Step 2: 4H Major Demand Zone */}
+                <div className={`p-3.5 rounded-xl border ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                  <div className="flex items-center gap-2 text-xs font-bold text-teal-400 uppercase tracking-wider mb-2.5">
+                    <Layers size={15} />
+                    <span>Step 2: 4H — Major Demand Zone (Displacement Base)</span>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="font-semibold text-slate-200">4H Impulse ATR Multiplier</span>
+                        <p className="text-[11px] text-slate-400">Institutional displacement body size threshold</p>
+                      </div>
+                      <input
+                        type="number"
+                        step={0.05}
+                        min={1.0}
+                        max={3.0}
+                        value={params.impulse_mult_4h ?? 1.25}
+                        onChange={e => handleParamChange('impulse_mult_4h', parseFloat(e.target.value) || 1.25)}
+                        className={`w-20 px-2 py-1 text-right text-xs rounded border ${
+                          isDark ? 'bg-[#131722] border-[#2a2e39] text-[#d1d4dc]' : 'bg-white border-slate-300 text-slate-700'
+                        }`}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800">
+                      <label className="flex items-center gap-2 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={params.check_unmitigated ?? true}
+                          onChange={e => handleParamChange('check_unmitigated', e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-600 text-teal-600 focus:ring-teal-500"
+                        />
+                        <span className="text-slate-300">Fresh / Unmitigated Only</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={params.show_4h_zones ?? true}
+                          onChange={e => handleParamChange('show_4h_zones', e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-600 text-teal-600 focus:ring-teal-500"
+                        />
+                        <span className="text-slate-300">Show 4H Box on Chart</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Step 3: 1H & 30M Refinement */}
+                <div className={`p-3.5 rounded-xl border ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                  <div className="flex items-center gap-2 text-xs font-bold text-sky-400 uppercase tracking-wider mb-2.5">
+                    <Sliders size={15} />
+                    <span>Step 3: 1H & 30M — Refine the 4H Zone</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="flex items-center gap-2 cursor-pointer select-none p-2 rounded-lg border border-slate-800 bg-slate-900/40">
+                      <input
+                        type="checkbox"
+                        checked={params.refine_1h ?? true}
+                        onChange={e => handleParamChange('refine_1h', e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-600 text-blue-600 focus:ring-blue-500"
+                      />
+                      <div>
+                        <span className="font-semibold text-slate-200 block">1H Refinement</span>
+                        <span className="text-[10px] text-slate-400">Search nested 1H origin</span>
+                      </div>
+                    </label>
+
+                    <label className="flex items-center gap-2 cursor-pointer select-none p-2 rounded-lg border border-slate-800 bg-slate-900/40">
+                      <input
+                        type="checkbox"
+                        checked={params.refine_30m ?? true}
+                        onChange={e => handleParamChange('refine_30m', e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-600 text-fuchsia-600 focus:ring-fuchsia-500"
+                      />
+                      <div>
+                        <span className="font-semibold text-slate-200 block">30M Refinement</span>
+                        <span className="text-[10px] text-slate-400">Sniper sub-zone</span>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Step 4 & 5: 15M Structure Change & 5M Confirmation */}
+                <div className={`p-3.5 rounded-xl border ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                  <div className="flex items-center gap-2 text-xs font-bold text-amber-400 uppercase tracking-wider mb-2.5">
+                    <Activity size={15} />
+                    <span>Step 4, 5 & 6: Retest Wait & 15M / 5M Confirmation</span>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={params.require_15m_choch ?? true}
+                        onChange={e => handleParamChange('require_15m_choch', e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-600 text-amber-600 focus:ring-amber-500 mt-0.5"
+                      />
+                      <div>
+                        <span className="font-semibold text-slate-200">Wait for 15M Structure Change (CHoCH)</span>
+                        <p className="text-[11px] text-slate-400">DO NOT enter immediately when touching 4H demand. Wait for 15M lower high break.</p>
+                      </div>
+                    </label>
+
+                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800">
+                      <label className="flex items-center gap-2 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={params.require_5m_sweep ?? true}
+                          onChange={e => handleParamChange('require_5m_sweep', e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-600 text-amber-600 focus:ring-amber-500"
+                        />
+                        <span className="text-slate-300">5M Liquidity Sweep</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={params.require_5m_bos ?? true}
+                          onChange={e => handleParamChange('require_5m_bos', e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-600 text-amber-600 focus:ring-amber-500"
+                        />
+                        <span className="text-slate-300">5M Displacement & BOS</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Step 7: Trade Execution, Stop Loss & Take Profit */}
+                <div className={`p-3.5 rounded-xl border ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                  <div className="flex items-center gap-2 text-xs font-bold text-lime-400 uppercase tracking-wider mb-2.5">
+                    <Target size={15} />
+                    <span>Step 7: Entry, Stop Loss & Take Profit (Highest Point)</span>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <span className="font-semibold text-slate-200 block mb-1">Stop Loss Placement</span>
+                        <select
+                          value={params.sl_mode || 'origin_candle'}
+                          onChange={e => handleParamChange('sl_mode', e.target.value)}
+                          className={`w-full px-2.5 py-1.5 rounded text-xs border ${
+                            isDark ? 'bg-[#131722] border-[#2a2e39] text-[#d1d4dc]' : 'bg-white border-slate-300 text-slate-700'
+                          }`}
+                        >
+                          <option value="origin_candle">Bottom of 5M Origin Candle</option>
+                          <option value="zone_low">Bottom of Refined Zone</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <span className="font-semibold text-slate-200 block mb-1">Take Profit Target</span>
+                        <select
+                          value={params.tp_mode || 'trend_high'}
+                          onChange={e => handleParamChange('tp_mode', e.target.value)}
+                          className={`w-full px-2.5 py-1.5 rounded text-xs border ${
+                            isDark ? 'bg-[#131722] border-[#2a2e39] text-[#d1d4dc]' : 'bg-white border-slate-300 text-slate-700'
+                          }`}
+                        >
+                          <option value="trend_high">Highest Point of the Trend</option>
+                          <option value="opposing_zone">Opposing 4H Supply Zone</option>
+                          <option value="fixed_rr">Fixed Risk:Reward</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 pt-1">
+                      <div>
+                        <span className="font-medium text-slate-400 block mb-1">SL ATR Buffer</span>
+                        <input
+                          type="number"
+                          step={0.05}
+                          min={0.0}
+                          max={1.0}
+                          value={params.sl_buffer_atr ?? 0.15}
+                          onChange={e => handleParamChange('sl_buffer_atr', parseFloat(e.target.value) || 0.15)}
+                          className={`w-full px-2.5 py-1 text-xs rounded border ${
+                            isDark ? 'bg-[#131722] border-[#2a2e39] text-[#d1d4dc]' : 'bg-white border-slate-300 text-slate-700'
+                          }`}
+                        />
+                      </div>
+                      <div>
+                        <span className="font-medium text-slate-400 block mb-1">Fixed R:R (if selected)</span>
+                        <input
+                          type="number"
+                          step={0.5}
+                          min={1.0}
+                          max={10.0}
+                          value={params.fixed_rr ?? 3.5}
+                          onChange={e => handleParamChange('fixed_rr', parseFloat(e.target.value) || 3.5)}
+                          className={`w-full px-2.5 py-1 text-xs rounded border ${
+                            isDark ? 'bg-[#131722] border-[#2a2e39] text-[#d1d4dc]' : 'bg-white border-slate-300 text-slate-700'
+                          }`}
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -696,6 +970,153 @@ export const IndicatorSettingsModal: React.FC<IndicatorSettingsModalProps> = ({ 
                         <p className={`text-xs mt-1 leading-relaxed ${isDark ? 'text-[#a1a7b4]' : 'text-slate-600'}`}>
                           Highest volume (POC) concentrated at the very top, but price closes weak near the low. Buyers tried to push higher but were heavily absorbed by limit sellers.
                         </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TOP-DOWN MULTI-TIMEFRAME DEMAND + STRUCTURE CONFIRMATION STRATEGY GUIDE */}
+              {isTopDown && (
+                <div className="space-y-4">
+                  <div className={`p-4 rounded-xl border ${isDark ? 'bg-gradient-to-r from-emerald-950/40 via-teal-950/30 to-sky-950/30 border-teal-500/30' : 'bg-gradient-to-r from-emerald-50 via-teal-50 to-sky-50 border-teal-200'}`}>
+                    <div className="flex items-start gap-3">
+                      <div className="p-2.5 rounded-xl bg-teal-500/20 text-teal-400 shrink-0 mt-0.5 border border-teal-500/30">
+                        <TrendingUp size={20} />
+                      </div>
+                      <div className="text-xs leading-relaxed">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm text-slate-100">Top-Down MTF Demand + Structure Strategy</span>
+                          <span className="px-2 py-0.5 rounded bg-teal-500/20 text-teal-300 font-mono text-[10px] font-bold">
+                            1D → 4H → 1H → 30M → 15M → 5M
+                          </span>
+                        </div>
+                        <p className={`mt-1.5 leading-relaxed ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                          A systematic institutional methodology that confirms macro daily trend direction, establishes 4H displacement demand zones, refines them with 1H &amp; 30M sub-structures, enforces a strict patience filter, and executes on 5M structure change with origin candle SL and highest swing high TP.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 1. Daily Trend/Bias */}
+                  <div className={`p-3 rounded-lg border ${isDark ? 'bg-slate-900/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                        <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-mono text-[10px]">1</span>
+                        <span>Daily — Macro Trend &amp; Bias</span>
+                      </div>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">
+                        Higher High + Higher Low = UPTREND
+                      </span>
+                    </div>
+                    <p className={`text-xs mt-1.5 leading-relaxed ${isDark ? 'text-[#a1a7b4]' : 'text-slate-600'}`}>
+                      The indicator first determines the Daily market structure. Daily UP searches exclusively for BUY/Demand setups. Daily DOWN searches for SELL/Supply. No counter-trend entries are ever permitted.
+                    </p>
+                  </div>
+
+                  {/* 2. 4H Major Demand Zone */}
+                  <div className={`p-3 rounded-lg border ${isDark ? 'bg-slate-900/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs font-bold text-teal-400 uppercase tracking-wider">
+                        <span className="w-5 h-5 rounded-full bg-teal-500/20 text-teal-400 flex items-center justify-center font-mono text-[10px]">2</span>
+                        <span>4H — Major Demand Zone</span>
+                      </div>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-teal-500/20 text-teal-300">
+                        Base → Displacement → BOS
+                      </span>
+                    </div>
+                    <p className={`text-xs mt-1.5 leading-relaxed ${isDark ? 'text-[#a1a7b4]' : 'text-slate-600'}`}>
+                      When Daily is bullish, the engine scans the 4H for institutional demand. Instead of arbitrary swing lows, it defines zones where consolidation/base was followed by strong bullish displacement breaking structure, with fresh unmitigated status.
+                    </p>
+                  </div>
+
+                  {/* 3. 1H + 30M Refinement */}
+                  <div className={`p-3 rounded-lg border ${isDark ? 'bg-slate-900/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs font-bold text-sky-400 uppercase tracking-wider">
+                        <span className="w-5 h-5 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center font-mono text-[10px]">3</span>
+                        <span>1H + 30M — Refine the 4H Zone</span>
+                      </div>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-sky-500/20 text-sky-300">
+                        Nested Sniper Sub-Zones
+                      </span>
+                    </div>
+                    <p className={`text-xs mt-1.5 leading-relaxed ${isDark ? 'text-[#a1a7b4]' : 'text-slate-600'}`}>
+                      Instead of treating the entire wide 4H zone as your entry, the indicator searches inside the 4H demand for nested 1H and 30M demand structures, compressing the zone from e.g. 1.08320–1.08510 down to 1.08418–1.08442 for minimal drawdown.
+                    </p>
+                  </div>
+
+                  {/* 4. Wait - Don't Enter Immediately */}
+                  <div className={`p-3 rounded-lg border ${isDark ? 'bg-amber-950/20 border-amber-800/40' : 'bg-amber-50 border-amber-200'}`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs font-bold text-amber-400 uppercase tracking-wider">
+                        <span className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center font-mono text-[10px]">4</span>
+                        <span>Wait — Don&apos;t Enter Immediately</span>
+                      </div>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold">
+                        Patience Filter
+                      </span>
+                    </div>
+                    <p className={`text-xs mt-1.5 leading-relaxed ${isDark ? 'text-amber-200/90' : 'text-amber-900'}`}>
+                      CRITICAL: When price reaches the refined 4H/1H/30M demand zone, NO BUY SIGNAL is generated yet. The indicator enters &ldquo;WAITING FOR LTF CONFIRMATION&rdquo; and monitors 15M and 5M.
+                    </p>
+                  </div>
+
+                  {/* 5. 15M Structure Change */}
+                  <div className={`p-3 rounded-lg border ${isDark ? 'bg-slate-900/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs font-bold text-indigo-400 uppercase tracking-wider">
+                        <span className="w-5 h-5 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-mono text-[10px]">5</span>
+                        <span>15M — Market Structure Change</span>
+                      </div>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300">
+                        15M CHoCH / BOS
+                      </span>
+                    </div>
+                    <p className={`text-xs mt-1.5 leading-relaxed ${isDark ? 'text-[#a1a7b4]' : 'text-slate-600'}`}>
+                      Once price is inside the higher-timeframe zone, it looks for evidence that sellers lost control: Lower Low → Lower High → Sweep/Rejection → Higher Low → Break of Structure (15M CHoCH), confirming order flow transition.
+                    </p>
+                  </div>
+
+                  {/* 6. 5M Confirmation */}
+                  <div className={`p-3 rounded-lg border ${isDark ? 'bg-slate-900/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs font-bold text-fuchsia-400 uppercase tracking-wider">
+                        <span className="w-5 h-5 rounded-full bg-fuchsia-500/20 text-fuchsia-400 flex items-center justify-center font-mono text-[10px]">6</span>
+                        <span>5M — Confirmation &amp; New Demand</span>
+                      </div>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-fuchsia-500/20 text-fuchsia-300">
+                        Liquidity Sweep + BOS
+                      </span>
+                    </div>
+                    <p className={`text-xs mt-1.5 leading-relaxed ${isDark ? 'text-[#a1a7b4]' : 'text-slate-600'}`}>
+                      The 5M timeframe is the execution trigger. The algorithm tracks liquidity sweep → impulsive bullish displacement → break of recent swing high → newly formed 5M origin demand zone.
+                    </p>
+                  </div>
+
+                  {/* 7. Entry, Stop Loss & Take Profit */}
+                  <div className={`p-3 rounded-lg border ${isDark ? 'bg-emerald-950/20 border-emerald-800/40' : 'bg-emerald-50 border-emerald-200'}`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                        <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-mono text-[10px]">7</span>
+                        <span>Entry, Stop Loss &amp; Take Profit Target</span>
+                      </div>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold">
+                        Highest Point of Trend
+                      </span>
+                    </div>
+                    <div className={`text-xs mt-2 space-y-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sky-400">Entry:</span>
+                        <span>Refined 5M demand zone created after market structure confirmation.</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-rose-400">Stop Loss:</span>
+                        <span>Strictly at the bottom of that origin candle (with ATR protection buffer).</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-emerald-400">Take Profit:</span>
+                        <span>At the highest point of the trend (prior major swing high). Then wait for market to play out!</span>
                       </div>
                     </div>
                   </div>

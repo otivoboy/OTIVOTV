@@ -1477,6 +1477,103 @@ export const TradingChart: React.FC<TradingChartProps> = ({
           ctx.restore();
         }
 
+        // 1.75 Render Indicator Callout Badges (Top-Down MTF Demand Confirmation, Retests, Targets, Levels)
+        if (data.callouts && data.callouts.length > 0) {
+          ctx.save();
+          data.callouts.forEach(callout => {
+            const anchorX = getXFromTime(timeScale, callout.x, currentCandles);
+            const anchorY = series.priceToCoordinate(callout.y);
+            if (anchorX === null || anchorY === null) return;
+            if (anchorX < -150 || anchorX > width + 150 || anchorY < -100 || anchorY > height + 100) return;
+
+            // Anchor dot
+            if (callout.showAnchorDot !== false) {
+              ctx.beginPath();
+              ctx.arc(anchorX, anchorY, 3, 0, Math.PI * 2);
+              ctx.fillStyle = callout.borderColor || '#38bdf8';
+              ctx.fill();
+            }
+
+            // Calculate badge position with offsets
+            const offsetX = callout.offsetX || 0;
+            const offsetY = callout.offsetY || (callout.arrowDirection === 'up' ? 32 : -32);
+            const badgeCenterX = Math.max(65, Math.min(width - 65, anchorX + offsetX));
+            const badgeCenterY = Math.max(18, Math.min(height - 18, anchorY + offsetY));
+
+            // Measure texts
+            ctx.font = 'bold 10px "JetBrains Mono", Inter, sans-serif';
+            const titleWidth = ctx.measureText(callout.title).width;
+            let subtitleWidth = 0;
+            if (callout.subtitle) {
+              ctx.font = '9px "JetBrains Mono", monospace';
+              subtitleWidth = ctx.measureText(callout.subtitle).width;
+            }
+            const badgeWidth = Math.max(titleWidth, subtitleWidth) + 16;
+            const badgeHeight = callout.subtitle ? 28 : 18;
+            const badgeLeft = badgeCenterX - badgeWidth / 2;
+            const badgeTop = badgeCenterY - badgeHeight / 2;
+
+            // Connection line or arrow pointer
+            ctx.beginPath();
+            ctx.strokeStyle = callout.borderColor || '#38bdf8';
+            ctx.lineWidth = 1;
+            if (callout.pointerType === 'arrow') {
+              const arrowHeadX = anchorX;
+              const arrowHeadY = anchorY + (offsetY > 0 ? 5 : -5);
+              const badgeEdgeY = offsetY > 0 ? badgeTop : (badgeTop + badgeHeight);
+
+              ctx.moveTo(badgeCenterX, badgeEdgeY);
+              ctx.lineTo(arrowHeadX, arrowHeadY);
+              ctx.stroke();
+
+              // Arrow tip
+              ctx.beginPath();
+              if (offsetY > 0) {
+                ctx.moveTo(anchorX, anchorY);
+                ctx.lineTo(anchorX - 3.5, anchorY + 6);
+                ctx.lineTo(anchorX + 3.5, anchorY + 6);
+              } else {
+                ctx.moveTo(anchorX, anchorY);
+                ctx.lineTo(anchorX - 3.5, anchorY - 6);
+                ctx.lineTo(anchorX + 3.5, anchorY - 6);
+              }
+              ctx.closePath();
+              ctx.fillStyle = callout.borderColor || '#38bdf8';
+              ctx.fill();
+            } else if (callout.pointerType === 'line') {
+              const badgeEdgeY = offsetY > 0 ? badgeTop : (badgeTop + badgeHeight);
+              ctx.moveTo(badgeCenterX, badgeEdgeY);
+              ctx.lineTo(anchorX, anchorY);
+              ctx.stroke();
+            }
+
+            // Draw badge body (Glassmorphic pill)
+            ctx.beginPath();
+            ctx.roundRect(badgeLeft, badgeTop, badgeWidth, badgeHeight, 4);
+            ctx.fillStyle = callout.bgColor || (isDark ? 'rgba(15, 23, 42, 0.92)' : 'rgba(255, 255, 255, 0.94)');
+            ctx.fill();
+            ctx.strokeStyle = callout.borderColor || '#38bdf8';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            // Draw title text
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = 'bold 10px "JetBrains Mono", Inter, sans-serif';
+            ctx.fillStyle = callout.titleColor || (isDark ? '#f8fafc' : '#0f172a');
+            const titleY = callout.subtitle ? (badgeTop + 8.5) : (badgeTop + badgeHeight / 2);
+            ctx.fillText(callout.title, badgeCenterX, titleY);
+
+            // Draw subtitle text
+            if (callout.subtitle) {
+              ctx.font = '9px "JetBrains Mono", monospace';
+              ctx.fillStyle = callout.subtitleColor || (isDark ? '#94a3b8' : '#64748b');
+              ctx.fillText(callout.subtitle, badgeCenterX, badgeTop + 20);
+            }
+          });
+          ctx.restore();
+        }
+
         // 1.8 Render Footprint Order Flow Clusters & Direction Intelligence
         if (data.footprints && data.footprints.length > 0) {
           ctx.save();

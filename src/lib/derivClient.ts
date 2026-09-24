@@ -41,7 +41,11 @@ const TIMEFRAME_TO_GRANULARITY: Record<string, number> = {
 const clientCandlesStore: Record<string, Record<string, Candle[]>> = {};
 const lastFetchedTime: Record<string, number> = {};
 const lastPrices: Record<string, number> = {};
-const requestedSymbols = new Set<string>(['1HZ100V', 'R_100', '1HZ10V', 'R_50', '1HZ25V', '1HZ75V', 'frxEURUSD', 'cryBTCUSD', 'frxXAUUSD']);
+const requestedSymbols = new Set<string>([
+  '1HZ100V', 'R_100', '1HZ75V', 'R_75', '1HZ50V', 'R_50', '1HZ25V', 'R_25', '1HZ10V', 'R_10',
+  'stpRNG', 'JD10', 'JD25', 'JD50', 'JD75', 'JD100', 'RDBULL', 'RDBEAR',
+  'frxEURUSD', 'cryBTCUSD', 'frxXAUUSD'
+]);
 
 Object.keys(TIMEFRAMES).forEach(tf => {
   clientCandlesStore[tf] = {};
@@ -168,6 +172,10 @@ export function generateSeedCandles(symbol: string, timeframe: string = '1m', co
   else if (symUpper.startsWith('BOOM50') || symUpper.startsWith('CRASH50')) { basePrice = 2500.0; volatility = 0.0025; }
   else if (symUpper.startsWith('BOOM') || symUpper.startsWith('CRASH')) { basePrice = 5000.0; volatility = 0.0025; }
   // Synthetic Volatility Indices
+  else if (symUpper.includes('1HZ300V')) { basePrice = 4250.0; volatility = 0.004; }
+  else if (symUpper.includes('1HZ250V')) { basePrice = 3120.0; volatility = 0.0038; }
+  else if (symUpper.includes('1HZ200V')) { basePrice = 2840.0; volatility = 0.0035; }
+  else if (symUpper.includes('1HZ150V')) { basePrice = 1890.0; volatility = 0.0032; }
   else if (symUpper.includes('1HZ100V')) { basePrice = 920.0; volatility = 0.003; }
   else if (symUpper.includes('R_100')) { basePrice = 547.0; volatility = 0.003; }
   else if (symUpper.includes('1HZ75V')) { basePrice = 6210.0; volatility = 0.0035; }
@@ -178,6 +186,17 @@ export function generateSeedCandles(symbol: string, timeframe: string = '1m', co
   else if (symUpper.includes('R_25')) { basePrice = 2720.0; volatility = 0.002; }
   else if (symUpper.includes('1HZ10V')) { basePrice = 9716.0; volatility = 0.0015; }
   else if (symUpper.includes('R_10')) { basePrice = 4808.0; volatility = 0.0015; }
+  // Step Index
+  else if (symUpper.includes('STPRNG') || symUpper.includes('STEP')) { basePrice = 8520.0; volatility = 0.0018; }
+  // Jump Indices
+  else if (symUpper.startsWith('JD100') || symUpper.includes('JUMP100')) { basePrice = 94500.0; volatility = 0.0035; }
+  else if (symUpper.startsWith('JD75') || symUpper.includes('JUMP75')) { basePrice = 72400.0; volatility = 0.003; }
+  else if (symUpper.startsWith('JD50') || symUpper.includes('JUMP50')) { basePrice = 48600.0; volatility = 0.0028; }
+  else if (symUpper.startsWith('JD25') || symUpper.includes('JUMP25')) { basePrice = 26500.0; volatility = 0.0025; }
+  else if (symUpper.startsWith('JD10') || symUpper.includes('JUMP10')) { basePrice = 38400.0; volatility = 0.002; }
+  // Bull & Bear Market Indices
+  else if (symUpper.startsWith('RDBULL') || symUpper.includes('BULL')) { basePrice = 2480.0; volatility = 0.0025; }
+  else if (symUpper.startsWith('RDBEAR') || symUpper.includes('BEAR')) { basePrice = 1760.0; volatility = 0.0025; }
   // Forex JPY pairs
   else if (symUpper.includes('CHFJPY')) { basePrice = 175.40; volatility = 0.0006; }
   else if (symUpper.includes('GBPJPY')) { basePrice = 196.20; volatility = 0.0007; }

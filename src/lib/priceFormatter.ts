@@ -54,6 +54,21 @@ export function getSymbolPriceFormat(symbol: string, samplePrice?: number): Symb
     return { type: 'price', precision: 2, minMove: 0.01 };
   }
 
+  // 8. Step Index (stpRNG) - 1 decimal place (steps in 0.1)
+  if (clean.includes('STPRNG') || clean.includes('STEP')) {
+    return { type: 'price', precision: 1, minMove: 0.1 };
+  }
+
+  // 9. Jump Indices (JD10, JD25, JD50, JD75, JD100) - 2 decimal places
+  if (clean.startsWith('JD') || clean.includes('JUMP')) {
+    return { type: 'price', precision: 2, minMove: 0.01 };
+  }
+
+  // 10. Bull and Bear Market Indices (RDBULL, RDBEAR) - 4 decimal places
+  if (clean.includes('RDBULL') || clean.includes('RDBEAR') || clean.includes('BULL') || clean.includes('BEAR')) {
+    return { type: 'price', precision: 4, minMove: 0.0001 };
+  }
+
   // 7. General Synthetic / Volatility Indices fallback
   if (clean.startsWith('1HZ') || clean.startsWith('R_') || clean.startsWith('VOL')) {
     return { type: 'price', precision: 2, minMove: 0.01 };

@@ -142,7 +142,7 @@ const Header = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [indicatorSearchQuery, setIndicatorSearchQuery] = useState('');
   const [indicatorTab, setIndicatorTab] = useState<'builtins' | 'scripts'>('builtins');
-  const [marketFilter, setMarketFilter] = useState<'all' | 'watchlist' | 'synthetic_index' | 'forex' | 'cryptocurrency' | 'commodities' | 'boom_crash'>('all');
+  const [marketFilter, setMarketFilter] = useState<'all' | 'watchlist' | 'synthetic_index' | 'volatility' | 'step_index' | 'jump_index' | 'bull_bear' | 'forex' | 'cryptocurrency' | 'commodities' | 'boom_crash'>('all');
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const categoryScrollRef = useRef<HTMLDivElement>(null);
@@ -316,22 +316,112 @@ const Header = () => {
   };
 
   const filteredSymbols = availableSymbols.filter(s => {
-    const matchesSearch = s.display.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          s.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          s.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          (s.marketDisplay && s.marketDisplay.toLowerCase().includes(searchQuery.toLowerCase()));
+    const rawQ = searchQuery.toLowerCase().trim();
+    // Normalize spelling typos like 'vilatility' -> 'volatility'
+    const normQ = rawQ.replace(/vilatility/g, 'volatility');
+    
+    const idLower = (s.id || '').toLowerCase();
+    const symLower = (s.symbol || '').toLowerCase();
+    const dispLower = (s.display || '').toLowerCase();
+    const subLower = (s.submarket || '').toLowerCase();
+    const subDispLower = (s.submarketDisplay || '').toLowerCase();
+    const mktLower = (s.market || '').toLowerCase();
+    const mktDispLower = (s.marketDisplay || '').toLowerCase();
+
+    // Check search query matches
+    let matchesSearch = true;
+    if (normQ) {
+      // Shorthand checks
+      const isVolQuery = normQ.includes('vol') || normQ.startsWith('v');
+      const isVol10 = isVolQuery && (normQ.includes('10') || normQ === 'v10');
+      const isVol25 = isVolQuery && (normQ.includes('25') || normQ === 'v25');
+      const isVol50 = isVolQuery && (normQ.includes('50') || normQ === 'v50');
+      const isVol75 = isVolQuery && (normQ.includes('75') || normQ === 'v75');
+      const isVol100 = isVolQuery && (normQ.includes('100') || normQ === 'v100');
+
+      const isVolMatch = 
+        (isVol10 && (idLower.includes('10') || dispLower.includes('10'))) ||
+        (isVol25 && (idLower.includes('25') || dispLower.includes('25'))) ||
+        (isVol50 && (idLower.includes('50') || dispLower.includes('50'))) ||
+        (isVol75 && (idLower.includes('75') || dispLower.includes('75'))) ||
+        (isVol100 && (idLower.includes('100') || dispLower.includes('100'))) ||
+        (normQ === 'volatility' && (dispLower.includes('volatility') || idLower.startsWith('1hz') || idLower.startsWith('r_')));
+
+      const isStepMatch = (normQ.includes('step') || normQ.includes('stprng')) && (
+        idLower.includes('step') || idLower.includes('stprng') || dispLower.includes('step')
+      );
+
+      const isJumpQuery = normQ.includes('jump') || normQ.startsWith('j');
+      const isJumpMatch = 
+        (isJumpQuery && normQ.includes('10') && (idLower.includes('jd10') || dispLower.includes('10'))) ||
+        (isJumpQuery && normQ.includes('25') && (idLower.includes('jd25') || dispLower.includes('25'))) ||
+        (isJumpQuery && normQ.includes('50') && (idLower.includes('jd50') || dispLower.includes('50'))) ||
+        (isJumpQuery && normQ.includes('75') && (idLower.includes('jd75') || dispLower.includes('75'))) ||
+        (isJumpQuery && normQ.includes('100') && (idLower.includes('jd100') || dispLower.includes('100'))) ||
+        (normQ === 'jump' && (idLower.startsWith('jd') || dispLower.includes('jump')));
+
+      const isBullBearMatch = 
+        ((normQ.includes('bull') || normQ === 'rdbull') && (idLower.includes('bull') || dispLower.includes('bull'))) ||
+        ((normQ.includes('bear') || normQ === 'rdbear') && (idLower.includes('bear') || dispLower.includes('bear')));
+
+      matchesSearch = dispLower.includes(normQ) || 
+                      symLower.includes(normQ) ||
+                      idLower.includes(normQ) ||
+                      subLower.includes(normQ) ||
+                      subDispLower.includes(normQ) ||
+                      mktLower.includes(normQ) ||
+                      mktDispLower.includes(normQ) ||
+                      isVolMatch ||
+                      isStepMatch ||
+                      isJumpMatch ||
+                      isBullBearMatch;
+    }
+
     if (!matchesSearch) return false;
     if (marketFilter === 'all') return true;
     if (marketFilter === 'watchlist') {
       const wSet = new Set((watchlist || []).map(w => w.toLowerCase()));
-      return wSet.has(s.id.toLowerCase()) || wSet.has(s.symbol.toLowerCase());
+      return wSet.has(idLower) || wSet.has(symLower);
+    }
+    if (marketFilter === 'volatility') {
+      return idLower.startsWith('1hz') || 
+             idLower.startsWith('r_') || 
+             dispLower.includes('volatility') || 
+             subLower === 'random_index';
+    }
+    if (marketFilter === 'step_index') {
+      return idLower.includes('step') || 
+             idLower.includes('stprng') || 
+             dispLower.includes('step') || 
+             subLower === 'step_index';
+    }
+    if (marketFilter === 'jump_index') {
+      return idLower.startsWith('jd') || 
+             dispLower.includes('jump') || 
+             subLower === 'jump_index';
+    }
+    if (marketFilter === 'bull_bear') {
+      return idLower.includes('bull') || 
+             idLower.includes('bear') || 
+             dispLower.includes('bull') || 
+             dispLower.includes('bear') || 
+             subLower === 'bull_bear';
     }
     if (marketFilter === 'boom_crash') {
       return s.market === 'boom_crash' || 
-             s.id.toLowerCase().includes('boom') || 
-             s.id.toLowerCase().includes('crash') || 
-             s.display.toLowerCase().includes('boom') || 
-             s.display.toLowerCase().includes('crash');
+             idLower.includes('boom') || 
+             idLower.includes('crash') || 
+             dispLower.includes('boom') || 
+             dispLower.includes('crash');
+    }
+    if (marketFilter === 'forex') {
+      return s.market === 'forex' || idLower.startsWith('frx');
+    }
+    if (marketFilter === 'cryptocurrency') {
+      return s.market === 'cryptocurrency' || idLower.startsWith('cry') || idLower.includes('btc') || idLower.includes('eth');
+    }
+    if (marketFilter === 'commodities') {
+      return s.market === 'commodities' || idLower.includes('xau') || idLower.includes('xag');
     }
     return s.market === marketFilter;
   });
@@ -743,6 +833,30 @@ const Header = () => {
                   <span>Watchlist ({(watchlist || []).length})</span>
                 </button>
                 <button 
+                  onClick={() => setMarketFilter('volatility')}
+                  className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'volatility' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
+                >
+                  Volatility (10, 25, 75...)
+                </button>
+                <button 
+                  onClick={() => setMarketFilter('step_index')}
+                  className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'step_index' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
+                >
+                  Step Index
+                </button>
+                <button 
+                  onClick={() => setMarketFilter('jump_index')}
+                  className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'jump_index' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
+                >
+                  Jump (10, 25, 50, 75, 100)
+                </button>
+                <button 
+                  onClick={() => setMarketFilter('bull_bear')}
+                  className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'bull_bear' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
+                >
+                  Bull & Bear
+                </button>
+                <button 
                   onClick={() => setMarketFilter('boom_crash')}
                   className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'boom_crash' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
                 >
@@ -753,12 +867,6 @@ const Header = () => {
                   className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'forex' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
                 >
                   Forex
-                </button>
-                <button 
-                  onClick={() => setMarketFilter('synthetic_index')}
-                  className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer ${marketFilter === 'synthetic_index' ? 'bg-tv-accent text-white font-bold' : 'text-tv-muted hover:text-tv-text'}`}
-                >
-                  Derived
                 </button>
                 <button 
                   onClick={() => setMarketFilter('cryptocurrency')}
@@ -1823,7 +1931,11 @@ const WatchlistPanel = ({ theme, onClose }: { theme: 'light' | 'dark', onClose: 
 
   const categories = [
     { key: 'ALL', label: 'All' },
-    { key: 'synthetic_index', label: 'Derived' },
+    { key: 'volatility', label: 'Volatility (10, 25, 75...)' },
+    { key: 'step_index', label: 'Step Index' },
+    { key: 'jump_index', label: 'Jump' },
+    { key: 'bull_bear', label: 'Bull & Bear' },
+    { key: 'boom_crash', label: 'Boom/Crash' },
     { key: 'forex', label: 'Forex' },
     { key: 'cryptocurrency', label: 'Crypto' },
     { key: 'commodities', label: 'Commodities' }
@@ -1831,6 +1943,34 @@ const WatchlistPanel = ({ theme, onClose }: { theme: 'light' | 'dark', onClose: 
 
   const displayedSymbols = availableSymbols.filter(s => {
     if (activeTab === 'ALL') return true;
+    const idLower = (s.id || '').toLowerCase();
+    const dispLower = (s.display || '').toLowerCase();
+    const subLower = (s.submarket || '').toLowerCase();
+
+    if (activeTab === 'volatility') {
+      return idLower.startsWith('1hz') || idLower.startsWith('r_') || dispLower.includes('volatility') || subLower === 'random_index';
+    }
+    if (activeTab === 'step_index') {
+      return idLower.includes('step') || idLower.includes('stprng') || dispLower.includes('step') || subLower === 'step_index';
+    }
+    if (activeTab === 'jump_index') {
+      return idLower.startsWith('jd') || dispLower.includes('jump') || subLower === 'jump_index';
+    }
+    if (activeTab === 'bull_bear') {
+      return idLower.includes('bull') || idLower.includes('bear') || dispLower.includes('bull') || dispLower.includes('bear') || subLower === 'bull_bear';
+    }
+    if (activeTab === 'boom_crash') {
+      return s.market === 'boom_crash' || idLower.includes('boom') || idLower.includes('crash') || dispLower.includes('boom') || dispLower.includes('crash');
+    }
+    if (activeTab === 'forex') {
+      return s.market === 'forex' || idLower.startsWith('frx');
+    }
+    if (activeTab === 'cryptocurrency') {
+      return s.market === 'cryptocurrency' || idLower.startsWith('cry') || idLower.includes('btc') || idLower.includes('eth');
+    }
+    if (activeTab === 'commodities') {
+      return s.market === 'commodities' || idLower.includes('xau') || idLower.includes('xag');
+    }
     return s.market === activeTab;
   });
 
