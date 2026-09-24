@@ -28,6 +28,7 @@ import { IndicatorSettingsModal } from './IndicatorSettingsModal';
 import { DrawingSettingsModal } from './DrawingSettingsModal';
 import { TopDownStrategyHUD } from './TopDownStrategyHUD';
 import { generateSeedCandles, derivClient } from '../../lib/derivClient';
+import { IndicatorCallout } from '../../lib/pineEngine';
 
 import { 
   Trash2, 
@@ -1477,30 +1478,32 @@ export const TradingChart: React.FC<TradingChartProps> = ({
           ctx.restore();
         }
 
-        // 1.75 Render Indicator Callout Badges (Top-Down MTF Demand Confirmation, Retests, Targets, Levels)
+        // 1.75 Render Indicator Callout Badges with Auto-Collision Avoidance
         if (data.callouts && data.callouts.length > 0) {
           ctx.save();
+
+          interface PreRenderCallout {
+            callout: IndicatorCallout;
+            anchorX: number;
+            anchorY: number;
+            badgeWidth: number;
+            badgeHeight: number;
+            isAbove: boolean;
+            desiredX: number;
+            desiredY: number;
+            finalX: number;
+            finalY: number;
+          }
+
+          const itemsToDraw: PreRenderCallout[] = [];
+
           data.callouts.forEach(callout => {
             const anchorX = getXFromTime(timeScale, callout.x, currentCandles);
             const anchorY = series.priceToCoordinate(callout.y);
             if (anchorX === null || anchorY === null) return;
-            if (anchorX < -150 || anchorX > width + 150 || anchorY < -100 || anchorY > height + 100) return;
+            if (anchorX < -200 || anchorX > width + 200 || anchorY < -150 || anchorY > height + 150) return;
 
-            // Anchor dot
-            if (callout.showAnchorDot !== false) {
-              ctx.beginPath();
-              ctx.arc(anchorX, anchorY, 3, 0, Math.PI * 2);
-              ctx.fillStyle = callout.borderColor || '#38bdf8';
-              ctx.fill();
-            }
-
-            // Calculate badge position with offsets
-            const offsetX = callout.offsetX || 0;
-            const offsetY = callout.offsetY || (callout.arrowDirection === 'up' ? 32 : -32);
-            const badgeCenterX = Math.max(65, Math.min(width - 65, anchorX + offsetX));
-            const badgeCenterY = Math.max(18, Math.min(height - 18, anchorY + offsetY));
-
-            // Measure texts
+            // Measure texts for badge dimensions
             ctx.font = 'bold 10px "JetBrains Mono", Inter, sans-serif';
             const titleWidth = ctx.measureText(callout.title).width;
             let subtitleWidth = 0;
@@ -1510,38 +1513,99 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             }
             const badgeWidth = Math.max(titleWidth, subtitleWidth) + 16;
             const badgeHeight = callout.subtitle ? 28 : 18;
+
+            const offsetX = callout.offsetX || 0;
+            const offsetY = callout.offsetY || (callout.arrowDirection === 'up' ? 32 : -32);
+            const isAbove = offsetY < 0;
+
+            const desiredX = Math.max(badgeWidth / 2 + 10, Math.min(width - badgeWidth / 2 - 10, anchorX + offsetX));
+            const desiredY = Math.max(badgeHeight / 2 + 10, Math.min(height - badgeHeight / 2 - 10, anchorY + offsetY));
+
+            itemsToDraw.push({
+              callout,
+              anchorX,
+              anchorY,
+              badgeWidth,
+              badgeHeight,
+              isAbove,
+              desiredX,
+              desiredY,
+              finalX: desiredX,
+              finalY: desiredY
+            });
+          });
+
+          // Resolve vertical overlaps between callout badges that are close horizontally (within 70px)
+          itemsToDraw.sort((a, b) => a.desiredY - b.desiredY);
+
+          for (let i = 0; i < itemsToDraw.length; i++) {
+            for (let j = i + 1; j < itemsToDraw.length; j++) {
+              const itemA = itemsToDraw[i];
+              const itemB = itemsToDraw[j];
+
+              if (Math.abs(itemA.finalX - itemB.finalX) < 70) {
+                const minYDistance = (itemA.badgeHeight + itemB.badgeHeight) / 2 + 8;
+                const actualYDistance = itemB.finalY - itemA.finalY;
+
+                if (actualYDistance < minYDistance) {
+                  const overlap = minYDistance - actualYDistance;
+                  if (itemA.isAbove && itemB.isAbove) {
+                    itemA.finalY = Math.max(20, itemA.finalY - overlap);
+                  } else if (!itemA.isAbove && !itemB.isAbove) {
+                    itemB.finalY = Math.min(height - 20, itemB.finalY + overlap);
+                  } else {
+                    itemA.finalY = Math.max(20, itemA.finalY - overlap / 2);
+                    itemB.finalY = Math.min(height - 20, itemB.finalY + overlap / 2);
+                  }
+                }
+              }
+            }
+          }
+
+          // Draw all resolved callouts
+          itemsToDraw.forEach(item => {
+            const { callout, anchorX, anchorY, badgeWidth, badgeHeight } = item;
+            const badgeCenterX = item.finalX;
+            const badgeCenterY = item.finalY;
             const badgeLeft = badgeCenterX - badgeWidth / 2;
             const badgeTop = badgeCenterY - badgeHeight / 2;
+
+            // Anchor dot
+            if (callout.showAnchorDot !== false) {
+              ctx.beginPath();
+              ctx.arc(anchorX, anchorY, 3, 0, Math.PI * 2);
+              ctx.fillStyle = callout.borderColor || '#38bdf8';
+              ctx.fill();
+            }
 
             // Connection line or arrow pointer
             ctx.beginPath();
             ctx.strokeStyle = callout.borderColor || '#38bdf8';
             ctx.lineWidth = 1;
-            if (callout.pointerType === 'arrow') {
-              const arrowHeadX = anchorX;
-              const arrowHeadY = anchorY + (offsetY > 0 ? 5 : -5);
-              const badgeEdgeY = offsetY > 0 ? badgeTop : (badgeTop + badgeHeight);
 
+            const isAboveAnchor = badgeCenterY < anchorY;
+            const badgeEdgeY = isAboveAnchor ? (badgeTop + badgeHeight) : badgeTop;
+
+            if (callout.pointerType === 'arrow') {
               ctx.moveTo(badgeCenterX, badgeEdgeY);
-              ctx.lineTo(arrowHeadX, arrowHeadY);
+              ctx.lineTo(anchorX, anchorY + (isAboveAnchor ? -4 : 4));
               ctx.stroke();
 
-              // Arrow tip
+              // Arrowhead
               ctx.beginPath();
-              if (offsetY > 0) {
-                ctx.moveTo(anchorX, anchorY);
-                ctx.lineTo(anchorX - 3.5, anchorY + 6);
-                ctx.lineTo(anchorX + 3.5, anchorY + 6);
-              } else {
+              if (isAboveAnchor) {
                 ctx.moveTo(anchorX, anchorY);
                 ctx.lineTo(anchorX - 3.5, anchorY - 6);
                 ctx.lineTo(anchorX + 3.5, anchorY - 6);
+              } else {
+                ctx.moveTo(anchorX, anchorY);
+                ctx.lineTo(anchorX - 3.5, anchorY + 6);
+                ctx.lineTo(anchorX + 3.5, anchorY + 6);
               }
               ctx.closePath();
               ctx.fillStyle = callout.borderColor || '#38bdf8';
               ctx.fill();
             } else if (callout.pointerType === 'line') {
-              const badgeEdgeY = offsetY > 0 ? badgeTop : (badgeTop + badgeHeight);
               ctx.moveTo(badgeCenterX, badgeEdgeY);
               ctx.lineTo(anchorX, anchorY);
               ctx.stroke();
@@ -1550,7 +1614,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             // Draw badge body (Glassmorphic pill)
             ctx.beginPath();
             ctx.roundRect(badgeLeft, badgeTop, badgeWidth, badgeHeight, 4);
-            ctx.fillStyle = callout.bgColor || (isDark ? 'rgba(15, 23, 42, 0.92)' : 'rgba(255, 255, 255, 0.94)');
+            ctx.fillStyle = callout.bgColor || (isDark ? 'rgba(15, 23, 42, 0.94)' : 'rgba(255, 255, 255, 0.95)');
             ctx.fill();
             ctx.strokeStyle = callout.borderColor || '#38bdf8';
             ctx.lineWidth = 1;
@@ -1568,9 +1632,10 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             if (callout.subtitle) {
               ctx.font = '9px "JetBrains Mono", monospace';
               ctx.fillStyle = callout.subtitleColor || (isDark ? '#94a3b8' : '#64748b');
-              ctx.fillText(callout.subtitle, badgeCenterX, badgeTop + 20);
+              ctx.fillText(callout.subtitle, badgeCenterX, badgeTop + 19.5);
             }
           });
+
           ctx.restore();
         }
 
@@ -1804,10 +1869,12 @@ export const TradingChart: React.FC<TradingChartProps> = ({
           }
         }
 
-        // 1.10 Render Indicator Tables & Smart Panels (Hidden on mobile / small screen view to prevent blocking chart and indicator overlays)
+        // 1.10 Render Indicator Tables & Smart Panels (Hidden on mobile or when interactive HUD overlay is active)
+        const hasTopDownHud = indicatorData.some(d => d.topDownState !== undefined);
         if (data.tables && data.tables.length > 0 && width >= 640 && (typeof window === 'undefined' || window.innerWidth >= 640)) {
           data.tables.forEach(table => {
             if (!table.rows || table.rows.length === 0) return;
+            if (table.id === 'mtf-demand-hud-table' && hasTopDownHud) return;
             ctx.save();
             
             const isTiny = table.size === 'tiny';

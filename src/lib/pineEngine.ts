@@ -2154,18 +2154,21 @@ export function runPineEngine(
       });
     }
 
+    // Check if current mode/trend is Bearish / Sell setup
+    const isSell = setupData?.type === 'SELL' || active4hZone?.type === 'SUPPLY' || dailyTrend === 'BEARISH';
+
     // 5. 15M CHOCH Badge Callout
     if (fifteenMChochData && fifteenMChochData.confirmed) {
       output.callouts.push({
         id: 'callout-15m-choch',
         x: fifteenMChochData.time,
         y: fifteenMChochData.price,
-        title: '15M CHOCH ⬆',
-        borderColor: '#0d9488',
-        titleColor: '#2dd4bf',
+        title: isSell ? '15M CHOCH ⬇' : '15M CHOCH ⬆',
+        borderColor: isSell ? '#f43f5e' : '#0d9488',
+        titleColor: isSell ? '#fb7185' : '#2dd4bf',
         offsetY: -32,
         pointerType: 'arrow',
-        arrowDirection: 'down',
+        arrowDirection: isSell ? 'up' : 'down',
         showAnchorDot: true
       });
     }
@@ -2176,17 +2179,17 @@ export function runPineEngine(
         id: 'callout-5m-bos',
         x: fiveMBosData.time,
         y: fiveMBosData.price,
-        title: '5M BOS ⬆',
-        borderColor: '#0d9488',
-        titleColor: '#2dd4bf',
-        offsetY: -34,
+        title: isSell ? '5M BOS ⬇' : '5M BOS ⬆',
+        borderColor: isSell ? '#f43f5e' : '#0d9488',
+        titleColor: isSell ? '#fb7185' : '#2dd4bf',
+        offsetY: -62,
         pointerType: 'arrow',
-        arrowDirection: 'down',
+        arrowDirection: isSell ? 'up' : 'down',
         showAnchorDot: true
       });
     }
 
-    // 7. 5M Demand Zone Box & Callout
+    // 7. 5M Demand/Supply Zone Box & Callout
     if (fiveMZoneData) {
       output.boxes.push({
         id: 'box-5m-entry-zone',
@@ -2194,8 +2197,8 @@ export function runPineEngine(
         y1: fiveMZoneData.top,
         x2: latestTime,
         y2: fiveMZoneData.bottom,
-        color: 'rgba(16, 185, 129, 0.32)',
-        bordercolor: '#10b981',
+        color: isSell ? 'rgba(244, 63, 94, 0.32)' : 'rgba(16, 185, 129, 0.32)',
+        bordercolor: isSell ? '#f43f5e' : '#10b981',
         borderstyle: 'solid',
         label: ''
       });
@@ -2203,86 +2206,96 @@ export function runPineEngine(
       output.callouts.push({
         id: 'callout-5m-zone',
         x: fiveMZoneData.time + 150,
-        y: fiveMZoneData.bottom,
-        title: '5M Demand Zone',
+        y: isSell ? fiveMZoneData.top : fiveMZoneData.bottom,
+        title: isSell ? '5M Supply Zone' : '5M Demand Zone',
         subtitle: `${formatLvl(fiveMZoneData.bottom)} – ${formatLvl(fiveMZoneData.top)}`,
-        borderColor: '#10b981',
+        borderColor: isSell ? '#f43f5e' : '#10b981',
         titleColor: '#ffffff',
-        subtitleColor: '#34d399',
-        offsetY: 28,
+        subtitleColor: isSell ? '#fb7185' : '#34d399',
+        offsetY: isSell ? -28 : 28,
         pointerType: 'line',
         showAnchorDot: true
       });
     }
 
-    // 8. Trade Setup Callouts: Entry (5M), SL (Below Candle Low), and TP (Previous High)
+    // 8. Trade Setup Callouts: Entry, SL, and TP
     if (setupData) {
       const entryTime = fiveMBosData ? (fiveMBosData.time + 300) : latestTime;
+      const isSetupSell = setupData.type === 'SELL';
 
-      // Entry (5M) Callout
+      // Entry Callout
       output.callouts.push({
         id: 'callout-entry',
         x: entryTime,
         y: setupData.entryPrice,
-        title: 'Entry (5M)',
+        title: isSetupSell ? 'Entry (5M SELL)' : 'Entry (5M BUY)',
         subtitle: formatLvl(setupData.entryPrice),
-        borderColor: '#0d9488',
+        borderColor: isSetupSell ? '#ef4444' : '#0d9488',
         titleColor: '#ffffff',
-        subtitleColor: '#2dd4bf',
-        offsetX: 30,
-        offsetY: -36,
+        subtitleColor: isSetupSell ? '#f87171' : '#2dd4bf',
+        offsetX: 35,
+        offsetY: isSetupSell ? 32 : -32,
         pointerType: 'arrow',
-        arrowDirection: 'down',
+        arrowDirection: isSetupSell ? 'up' : 'down',
         showAnchorDot: true
       });
 
-      // SL (Below Candle Low) Callout
+      // SL Callout
       output.callouts.push({
         id: 'callout-sl',
         x: entryTime,
         y: setupData.slPrice,
-        title: 'SL (Below Candle Low)',
+        title: isSetupSell ? 'SL (Above Candle High)' : 'SL (Below Candle Low)',
         subtitle: formatLvl(setupData.slPrice),
         borderColor: '#ef4444',
         titleColor: '#ef4444',
         subtitleColor: '#ef4444',
-        offsetX: 25,
-        offsetY: 34,
+        offsetX: -35,
+        offsetY: isSetupSell ? -38 : 38,
         pointerType: 'arrow',
-        arrowDirection: 'up',
+        arrowDirection: isSetupSell ? 'down' : 'up',
         showAnchorDot: true
       });
 
-      // TP (Previous High) Callout
-      // Find highest high point time
-      let highestTime = latestTime;
-      let maxH = -Infinity;
-      for (let i = Math.max(0, candles.length - 80); i < candles.length; i++) {
-        if (highPrices[i] > maxH) {
-          maxH = highPrices[i];
-          highestTime = times[i];
+      // TP Callout - Target Time (High for BUY, Low for SELL)
+      let targetTime = latestTime;
+      if (isSetupSell) {
+        let minL = Infinity;
+        for (let i = Math.max(0, candles.length - 80); i < candles.length; i++) {
+          if (lowPrices[i] < minL) {
+            minL = lowPrices[i];
+            targetTime = times[i];
+          }
+        }
+      } else {
+        let maxH = -Infinity;
+        for (let i = Math.max(0, candles.length - 80); i < candles.length; i++) {
+          if (highPrices[i] > maxH) {
+            maxH = highPrices[i];
+            targetTime = times[i];
+          }
         }
       }
 
       output.callouts.push({
         id: 'callout-tp',
-        x: highestTime,
+        x: targetTime,
         y: setupData.tpPrice,
-        title: 'TP (Previous High)',
+        title: isSetupSell ? 'TP (Target Swing Low)' : 'TP (Previous High)',
         subtitle: formatLvl(setupData.tpPrice),
-        borderColor: '#0d9488',
-        titleColor: '#2dd4bf',
-        subtitleColor: '#2dd4bf',
-        offsetY: -32,
+        borderColor: '#10b981',
+        titleColor: '#34d399',
+        subtitleColor: '#34d399',
+        offsetY: isSetupSell ? 32 : -32,
         pointerType: 'arrow',
-        arrowDirection: 'down',
+        arrowDirection: isSetupSell ? 'up' : 'down',
         showAnchorDot: true
       });
 
-      // Horizontal dashed projection line extending from TP high wick across to price axis
+      // Horizontal dashed projection line extending from TP high/low wick across to price axis
       output.lines.push({
         id: 'setup-tp-projection-line',
-        x1: highestTime,
+        x1: targetTime,
         y1: setupData.tpPrice,
         x2: latestTime + 3600 * 8,
         y2: setupData.tpPrice,
